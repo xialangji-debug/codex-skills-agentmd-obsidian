@@ -1,0 +1,11 @@
+.DS_Store
+Thumbs.db
+*.pyc
+__pycache__/
+.env
+.env.*
+*.log
+*.tmp
+usage.sqlite
+*.db
+*.sqlite

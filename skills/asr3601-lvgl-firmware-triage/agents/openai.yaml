@@ -1,0 +1,4 @@
+interface:
+  display_name: "ASR3601 LVGL Firmware Triage"
+  short_description: "Triage and fix ASR3601/LVGL watch firmware bugs"
+  default_prompt: "Use this skill to investigate an ASR3601/LVGL children-watch firmware bug, decide whether it exists, identify cause and risk, and propose or implement a scoped fix."

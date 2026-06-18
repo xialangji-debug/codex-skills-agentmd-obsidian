@@ -1,0 +1,5 @@
+interface:
+  display_name: "Skill Usage Tracker"
+  short_description: "Track local skill usage and feedback"
+  brand_color: "#2563EB"
+  default_prompt: "Use $skill-usage-tracker to show my recent skill usage report."

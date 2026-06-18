@@ -1,0 +1,4 @@
+interface:
+  display_name: "CATStudio Log Extractor"
+  short_description: "Extract CATStudio zip logs by analysis profile."
+  default_prompt: "Extract the useful logs from this CATStudio zip for AI triage."
