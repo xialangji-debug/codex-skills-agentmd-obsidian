@@ -1,0 +1,4 @@
+interface:
+  display_name: "ASR3601 Fix Verifier"
+  short_description: "Verify ASR3601 firmware fixes cleanly"
+  default_prompt: "Use $asr3601-fix-verifier to verify this ASR3601 firmware fix before reporting."

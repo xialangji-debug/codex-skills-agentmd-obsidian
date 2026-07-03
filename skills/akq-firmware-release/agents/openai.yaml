@@ -1,0 +1,6 @@
+interface:
+  display_name: "阿科奇出版本助手"
+  short_description: "整理并上传阿科奇国内固件版本文件"
+  default_prompt: "Use $akq-firmware-release to prepare and upload an 阿科奇 domestic firmware release."
+policy:
+  allow_implicit_invocation: true

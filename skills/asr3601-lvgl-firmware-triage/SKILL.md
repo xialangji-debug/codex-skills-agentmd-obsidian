@@ -1,6 +1,6 @@
 ---
 name: asr3601-lvgl-firmware-triage
-description: Intake, triage, explain, and fix ASR3601/Crane SDK children-watch firmware issues using LVGL v7 project evidence. Use when Codex works in or discusses <ASR3601 工程路径>, <Crane SDK 工程路径>, ASR3601, Crane SDK, LVGL, children-watch firmware, watch/phone/sport variants, low-battery behavior, SIM card removal, overlapping power/SIM popups, location scheduling, IMEI/friend protocol behavior, screen size, wallpaper scaling, charging icons, calculator branch porting, pixel-level UI offset fixes, screenshot-driven UI triage, O2/subscript text display, screenshots, logs, protocol PDFs, cross-branch/similar/regression classification, or user requests like “这个问题有没有/为什么/如何修复/先告诉我能不能做”.
+description: Intake, triage, explain, and fix ASR3601/Crane SDK children-watch firmware issues using LVGL v7 project evidence. Use when Codex works in or discusses D:\XM\360x_202403r1, D:\XM\crane-2024.03_r4, ASR3601, Crane SDK, LVGL, children-watch firmware, watch/phone/sport variants, low-battery behavior, SIM card removal, overlapping power/SIM popups, location scheduling, IMEI/friend protocol behavior, screen size, wallpaper scaling, charging icons, calculator branch porting, pixel-level UI offset fixes, screenshot-driven UI triage, O2/subscript text display, screenshots, logs, protocol PDFs, CATStudio evidence packs, cross-branch/similar/regression classification, or user requests like “这个问题有没有/为什么/如何修复/先告诉我能不能做”. Must answer whether the issue exists before editing when asked, inspect screenshots/logs/zips first, and finish with 存在/原因/修改/影响/验证/风险.
 ---
 
 # ASR3601 LVGL Firmware Triage
@@ -11,12 +11,22 @@ Use this skill to keep firmware bug work evidence-led, scoped to the correct pro
 
 1. Read local project instructions first: `AGENTS.md`, build notes, and any user-attached screenshots, videos, logs, PDFs, or protocol notes.
 2. Identify the active workspace and product variant before editing. Distinguish at least:
-   - `<ASR3601 工程路径>`
-   - `<Crane SDK 工程路径>`
+   - `D:\XM\360x_202403r1`
+   - `D:\XM\crane-2024.03_r4`
    - standard watch, sport watch, and phone/simulator targets
 3. If the user asks “有没有/能不能做/先告诉我”, answer the existence and feasibility question before making edits.
 4. Prefer `rg`, CodeGraph, and existing project symbols/resources over broad filesystem scanning or invented names.
 5. Avoid changing unrelated variants. If the user says “不动运动版” or similar, explicitly preserve that boundary.
+
+## Mandatory Evidence Gate
+
+Before editing, obey these gates:
+
+- If the user asks “有没有/还存在吗/先告诉我/能不能做”, answer that status from evidence first.
+- If a screenshot, video, log zip, CATStudio folder, protocol PDF, or named artifact is attached, inspect that artifact before broad code theory.
+- If a CATStudio zip/folder/.icl is attached, use `catstudio-log-extractor`; for broad triage prefer `--evidence-pack`.
+- If the task is similar issue, regression, or cross-branch, perform the narrow `fix-patterns/` lookup through `obsidian-fix-pattern-memory`.
+- After making a firmware fix, use `asr3601-fix-verifier` before the final report when a local verification path exists.
 
 ## Intake Routing
 

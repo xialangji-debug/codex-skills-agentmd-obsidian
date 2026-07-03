@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import re
 import struct
 import sys
@@ -23,6 +24,7 @@ from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 TICKS_PER_SECOND = 32768
 MAX_RECORD_PAYLOAD = 8 * 1024 * 1024
+CACHE_VERSION = 1
 DEFAULT_ID_MAP = {
     (57, 9603): ("MMI", "LOG", "uartCfgGetSetting", 'diagPrintf("%s ",logger_buffer)', "builtin"),
     (57, 9604): ("MMI", "LOG", "DUMP", 'diagPrintf("%s ",logger_buffer)', "builtin"),
@@ -122,6 +124,22 @@ PROFILE_RULES = {
     },
 }
 
+DEFAULT_FAST_KEYWORDS = [
+    "recv message",
+    "Received",
+    "TXT",
+    "CHAT1",
+    "WeChat",
+    "GPS",
+    "location",
+    "LBS",
+    "fatal",
+    "assert",
+    "reset",
+    "watchdog",
+    "error",
+]
+
 
 @dataclass(frozen=True)
 class DbEntry:
@@ -165,6 +183,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-o", "--output", help="Output file for one profile, or output directory for multiple profiles.")
     parser.add_argument("--output-dir", help="Output directory. Overrides directory behavior of --output.")
     parser.add_argument("--summary", action="store_true", help="Also write observed category summary TSV.")
+    parser.add_argument(
+        "--evidence-pack",
+        action="store_true",
+        help="Write mmi/crash/network/memory/system outputs, category summary, and an AI triage _evidence.md.",
+    )
+    parser.add_argument(
+        "--fast-evidence",
+        action="store_true",
+        help="Fast first-pass triage: write mmi, summary, evidence md, and keyword hits without broad profiles.",
+    )
+    parser.add_argument("--evidence-md", action="store_true", help="Also write an AI triage _evidence.md.")
+    parser.add_argument("--evidence-limit", type=int, default=12, help="Records to show per profile in _evidence.md.")
     parser.add_argument("--include", action="append", default=[], help="Add category path: Cat1, Cat1/Cat2, Cat1/Cat2/Cat3. '*' is wildcard.")
     parser.add_argument("--keyword", action="append", default=[], help="Add records matching term in category, DB format, or payload preview.")
     parser.add_argument(
@@ -182,6 +212,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--full-hex", action="store_true", help="Keep full payload hex in extended output. Can make files large.")
     parser.add_argument("--extended", action="store_true", help="Use extended columns even for mmi profile.")
     parser.add_argument("--max-records", type=int, help="Stop after this many records per profile.")
+    parser.add_argument("--no-cache", action="store_true", help="Disable fast-evidence output cache reuse.")
     parser.add_argument("--list-profiles", action="store_true", help="Print available profiles and exit.")
     return parser.parse_args()
 
@@ -205,11 +236,22 @@ def main() -> int:
     custom_includes = parse_custom_includes(args)
     profiles = choose_profiles(args, custom_includes)
     output_paths = resolve_output_paths(input_path, args, profiles)
+    if use_fast_cache(args) and cached_outputs_valid(input_path, args, profiles, output_paths):
+        for profile in profiles:
+            print(f"Using cached {profile}: {output_paths[profile]}")
+        if should_write_summary(args):
+            print(f"Using cached summary: {summary_path(input_path, args)}")
+        if should_write_evidence(args):
+            print(f"Using cached evidence: {evidence_path(input_path, args)}")
+        return 0
 
     blob, id_map, icl_name = read_input(input_path)
     outputs = open_outputs(output_paths, profiles, args, input_path, icl_name)
     summary_counts: Dict[Tuple[str, str, str, int, int, str, str], int] = {}
     profile_counts = {profile: 0 for profile in profiles}
+    evidence_records: Dict[str, List[LogRecord]] = {profile: [] for profile in profiles}
+    keyword_records: List[Tuple[str, LogRecord]] = []
+    hit_terms = keyword_hit_terms(args)
 
     try:
         for record in iter_records(blob, id_map, args.year_start, args.year_end):
@@ -225,34 +267,167 @@ def main() -> int:
             summary_counts[summary_key] = summary_counts.get(summary_key, 0) + 1
 
             for profile in profiles:
+                profile_keywords = [] if args.fast_evidence and profile != "custom" else args.keyword
                 if args.max_records is not None and profile_counts[profile] >= args.max_records:
                     continue
-                if not record_matches_profile(record, profile, custom_includes, args.keyword):
+                if not record_matches_profile(record, profile, custom_includes, profile_keywords):
                     continue
                 if args.require_keyword and not record_matches_terms(record, args.require_keyword, include_payload=True):
                     continue
+                if args.fast_evidence and profile != "mmi" and hit_terms and not record_matches_terms(
+                    record, hit_terms, include_payload=True
+                ):
+                    continue
                 write_record(outputs[profile], record, legacy_mmi_output(profile, args, custom_includes), args)
                 profile_counts[profile] += 1
+                if len(evidence_records[profile]) < args.evidence_limit:
+                    evidence_records[profile].append(record)
+                if hit_terms and len(keyword_records) < args.evidence_limit * 2:
+                    if record_matches_terms(record, hit_terms, include_payload=True):
+                        keyword_records.append((profile, record))
     finally:
         for handle in outputs.values():
             handle.close()
 
-    if args.summary:
+    if should_write_summary(args):
         write_summary(summary_path(input_path, args), summary_counts)
+    if should_write_evidence(args):
+        write_evidence_md(
+            evidence_path(input_path, args),
+            input_path,
+            icl_name,
+            profiles,
+            output_paths,
+            profile_counts,
+            summary_counts,
+            evidence_records,
+            keyword_records,
+            args,
+        )
+    if use_fast_cache(args):
+        write_cache_meta(input_path, args, profiles, output_paths)
 
     for profile in profiles:
         print(f"Wrote {profile_counts[profile]} records [{profile}]: {output_paths[profile]}")
-    if args.summary:
+    if should_write_summary(args):
         print(f"Wrote summary: {summary_path(input_path, args)}")
+    if should_write_evidence(args):
+        print(f"Wrote evidence: {evidence_path(input_path, args)}")
     return 0
 
 
 def choose_profiles(args: argparse.Namespace, custom_includes: Sequence[Tuple[Optional[str], Optional[str], Optional[str]]]) -> List[str]:
+    if args.evidence_pack and not args.profile:
+        return ["mmi", "crash", "network", "memory", "system"]
+    if args.fast_evidence and not args.profile:
+        return ["mmi"]
     if args.profile:
         return dedupe(args.profile)
     if custom_includes or args.keyword:
         return ["custom"]
     return ["mmi"]
+
+
+def should_write_summary(args: argparse.Namespace) -> bool:
+    return bool(args.summary or args.evidence_pack or args.fast_evidence)
+
+
+def should_write_evidence(args: argparse.Namespace) -> bool:
+    return bool(args.evidence_md or args.evidence_pack or args.fast_evidence)
+
+
+def keyword_hit_terms(args: argparse.Namespace) -> List[str]:
+    terms = list(args.keyword) + list(args.require_keyword)
+    if args.fast_evidence and not terms:
+        terms = list(DEFAULT_FAST_KEYWORDS)
+    return dedupe(terms)
+
+
+def use_fast_cache(args: argparse.Namespace) -> bool:
+    return bool(args.fast_evidence and not args.no_cache)
+
+
+def cached_outputs_valid(
+    input_path: Path,
+    args: argparse.Namespace,
+    profiles: Sequence[str],
+    output_paths: Dict[str, Path],
+) -> bool:
+    meta_path = cache_meta_path(input_path, args)
+    if not meta_path.exists():
+        return False
+
+    try:
+        with meta_path.open("r", encoding="utf-8") as handle:
+            meta = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return False
+
+    if meta.get("signature") != cache_signature(input_path, args, profiles):
+        return False
+
+    return all(path.exists() for path in expected_artifact_paths(input_path, args, output_paths))
+
+
+def write_cache_meta(
+    input_path: Path,
+    args: argparse.Namespace,
+    profiles: Sequence[str],
+    output_paths: Dict[str, Path],
+) -> None:
+    meta_path = cache_meta_path(input_path, args)
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    artifacts = [str(path) for path in expected_artifact_paths(input_path, args, output_paths)]
+    with meta_path.open("w", encoding="utf-8", newline="\n") as handle:
+        json.dump(
+            {
+                "signature": cache_signature(input_path, args, profiles),
+                "artifacts": artifacts,
+            },
+            handle,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        handle.write("\n")
+
+
+def cache_meta_path(input_path: Path, args: argparse.Namespace) -> Path:
+    return output_artifact_dir(input_path, args) / f"{safe_input_stem(input_path)}_catstudio_cache.json"
+
+
+def expected_artifact_paths(input_path: Path, args: argparse.Namespace, output_paths: Dict[str, Path]) -> List[Path]:
+    paths = list(output_paths.values())
+    if should_write_summary(args):
+        paths.append(summary_path(input_path, args))
+    if should_write_evidence(args):
+        paths.append(evidence_path(input_path, args))
+    return paths
+
+
+def cache_signature(input_path: Path, args: argparse.Namespace, profiles: Sequence[str]) -> Dict[str, object]:
+    stat = input_path.stat()
+    return {
+        "input": str(input_path.resolve()),
+        "cache_version": CACHE_VERSION,
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "profiles": list(profiles),
+        "include": list(args.include),
+        "keyword": list(args.keyword),
+        "require_keyword": list(args.require_keyword),
+        "cat1": args.cat1,
+        "cat2": args.cat2,
+        "cat3": args.cat3,
+        "year_start": args.year_start,
+        "year_end": args.year_end,
+        "hex_limit": args.hex_limit,
+        "full_hex": bool(args.full_hex),
+        "extended": bool(args.extended),
+        "max_records": args.max_records,
+        "evidence_limit": args.evidence_limit,
+        "fast_evidence": bool(args.fast_evidence),
+    }
 
 
 def parse_custom_includes(args: argparse.Namespace) -> List[Tuple[Optional[str], Optional[str], Optional[str]]]:
@@ -293,21 +468,29 @@ def resolve_output_paths(input_path: Path, args: argparse.Namespace, profiles: S
 
 
 def default_output_name(input_path: Path, profile: str) -> str:
-    safe_stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", input_path.stem).strip("_")
-    return f"{safe_stem}_catstudio_{profile}.tsv"
+    return f"{safe_input_stem(input_path)}_catstudio_{profile}.tsv"
 
 
 def summary_path(input_path: Path, args: argparse.Namespace) -> Path:
+    return output_artifact_dir(input_path, args) / f"{safe_input_stem(input_path)}_catstudio_summary.tsv"
+
+
+def evidence_path(input_path: Path, args: argparse.Namespace) -> Path:
+    return output_artifact_dir(input_path, args) / f"{safe_input_stem(input_path)}_evidence.md"
+
+
+def output_artifact_dir(input_path: Path, args: argparse.Namespace) -> Path:
     if args.output_dir:
-        out_dir = Path(args.output_dir)
+        return Path(args.output_dir)
     elif args.output and (not Path(args.output).suffix or args.profile and len(args.profile) > 1):
-        out_dir = Path(args.output)
+        return Path(args.output)
     elif args.output and Path(args.output).suffix:
-        out_dir = Path(args.output).parent
-    else:
-        out_dir = input_path.parent
-    safe_stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", input_path.stem).strip("_")
-    return out_dir / f"{safe_stem}_catstudio_summary.tsv"
+        return Path(args.output).parent
+    return input_path.parent
+
+
+def safe_input_stem(input_path: Path) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", input_path.stem).strip("_")
 
 
 def read_input(input_path: Path) -> Tuple[bytes, Dict[Tuple[int, int], DbEntry], str]:
@@ -562,7 +745,7 @@ def legacy_mmi_output(
         profile == "mmi"
         and not args.extended
         and not custom_includes
-        and not args.keyword
+        and (not args.keyword or args.fast_evidence)
         and not args.require_keyword
     )
 
@@ -678,6 +861,98 @@ def write_summary(path: Path, counts: Dict[Tuple[str, str, str, int, int, str, s
                 f"{count}\t{cat1}\t{cat2}\t{cat3}\t{module_id}\t{message_id}\t"
                 f"{source}\t{sanitize_field(fmt)}\n"
             )
+
+
+def write_evidence_md(
+    path: Path,
+    source: Path,
+    icl_name: str,
+    profiles: Sequence[str],
+    output_paths: Dict[str, Path],
+    profile_counts: Dict[str, int],
+    summary_counts: Dict[Tuple[str, str, str, int, int, str, str], int],
+    evidence_records: Dict[str, List[LogRecord]],
+    keyword_records: List[Tuple[str, LogRecord]],
+    args: argparse.Namespace,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write("# CATStudio Evidence Pack\n\n")
+        handle.write(f"- Source: `{source}`\n")
+        handle.write(f"- ICL: `{icl_name}`\n")
+        handle.write(f"- Profiles: `{', '.join(profiles)}`\n")
+        if args.keyword:
+            handle.write(f"- Keywords: `{', '.join(args.keyword)}`\n")
+        elif args.fast_evidence:
+            handle.write(f"- Fast keywords: `{', '.join(DEFAULT_FAST_KEYWORDS)}`\n")
+        if args.require_keyword:
+            handle.write(f"- Required keywords: `{', '.join(args.require_keyword)}`\n")
+        handle.write("\n## Outputs\n\n")
+        for profile in profiles:
+            handle.write(f"- `{profile}`: {profile_counts.get(profile, 0)} records -> `{output_paths[profile]}`\n")
+        if should_write_summary(args):
+            handle.write(f"- `summary`: `{summary_path(source, args)}`\n")
+
+        handle.write("\n## Top Categories\n\n")
+        for (cat1, cat2, cat3, module_id, message_id, db_source, db_format), count in sorted(
+            summary_counts.items(), key=lambda item: item[1], reverse=True
+        )[:20]:
+            handle.write(
+                f"- {count} x `{cat1}/{cat2}/{cat3}` module={module_id} msg={message_id} "
+                f"source=`{db_source}` fmt=`{sanitize_field(db_format)}`\n"
+            )
+
+        if keyword_records:
+            handle.write("\n## Keyword Hits\n\n")
+            for profile, record in keyword_records:
+                handle.write(format_evidence_record(profile, record))
+
+        handle.write("\n## Profile Timeline Samples\n\n")
+        for profile in profiles:
+            handle.write(f"### {profile}\n\n")
+            records = evidence_records.get(profile, [])
+            if not records:
+                handle.write("- No matching records captured.\n\n")
+                continue
+            for record in records:
+                handle.write(format_evidence_record(profile, record))
+            handle.write("\n")
+
+        handle.write("## Suggested Code Searches\n\n")
+        suggestions = sorted(suggest_search_terms(profiles, evidence_records, keyword_records))
+        if not suggestions:
+            suggestions = ["MMI", "LOG", "alarm", "reset", "watchdog", "sim", "location"]
+        for term in suggestions[:30]:
+            handle.write(f"- `rg -n \"{term}\" <project-root>`\n")
+
+
+def format_evidence_record(profile: str, record: LogRecord) -> str:
+    data = decode_or_preview_payload(record.payload, text_preferred=is_text_record(record))
+    data = data[:300] + ("..." if len(data) > 300 else "")
+    return (
+        f"- `{profile}` {record.pc_time} / {record.comm_time} "
+        f"`{record.cat1}/{record.cat2}/{record.cat3}` "
+        f"module={record.module_id} msg={record.message_id}: {data}\n"
+    )
+
+
+def suggest_search_terms(
+    profiles: Sequence[str],
+    evidence_records: Dict[str, List[LogRecord]],
+    keyword_records: List[Tuple[str, LogRecord]],
+) -> List[str]:
+    terms = set()
+    for profile in profiles:
+        terms.update(PROFILE_RULES.get(profile, {}).get("terms", []))
+    for _, record in keyword_records:
+        terms.update(part for part in (record.cat1, record.cat2, record.cat3) if part)
+        text = decode_or_preview_payload(record.payload, text_preferred=is_text_record(record))
+        for match in re.findall(r"[A-Za-z_][A-Za-z0-9_]{3,}", text):
+            terms.add(match)
+    for records in evidence_records.values():
+        for record in records[:3]:
+            terms.update(part for part in (record.cat1, record.cat2, record.cat3) if part)
+    return [term for term in terms if len(term) <= 64]
 
 
 if __name__ == "__main__":

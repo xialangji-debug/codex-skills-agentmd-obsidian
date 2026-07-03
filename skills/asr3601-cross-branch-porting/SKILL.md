@@ -1,6 +1,6 @@
 ---
 name: asr3601-cross-branch-porting
-description: Port ASR3601/Crane SDK LVGL children-watch firmware fixes across branches, versions, or sibling projects. Use when the user asks to migrate changes from another branch/version/project, mentions “移植/别的版本/当前分支/另一个工程/JC2/同类问题/回归”, or needs reusable Obsidian fix-pattern guidance for ASR3601, Crane SDK, LVGL v7, watch firmware, cloud album, scheduled power, alarms, contacts, SIM, boot animation, UI resources, or protocol behavior.
+description: Port ASR3601/Crane SDK LVGL children-watch firmware fixes across branches, versions, or sibling projects. Use when the user asks to migrate changes from another branch/version/project, mentions “移植/别的版本/当前分支/另一个工程/JC2/同类问题/回归”, needs source-target diff/merge-base checks, or needs reusable Obsidian fix-pattern guidance for ASR3601, Crane SDK, LVGL v7, watch firmware, cloud album, scheduled power, alarms, contacts, SIM, boot animation, UI resources, or protocol behavior. Must run preflight branch/short-commit/dirty-worktree checks, compare source and target, verify after the port, and write/update fix-pattern memory for reusable verified fixes.
 ---
 
 # ASR3601 Cross-Branch Porting
@@ -26,7 +26,7 @@ Infer these from the user, workspace, git state, attached files, or memory befor
 验证方式：
 ```
 
-Ask only when the source or target cannot be inferred safely. Common roots include `<ASR3601 工程路径>`, `<Crane SDK 工程路径>`, and temporary desktop/export folders.
+Ask only when the source or target cannot be inferred safely. Common roots include `D:\XM\360x_202403r1`, `D:\XM\crane-2024.03_r4`, and temporary desktop/export folders.
 
 ## Memory Lookup
 
@@ -35,7 +35,7 @@ Use the user's Obsidian Markdown memory rules, not Basic Memory MCP.
 For cross-branch, similar issue, regression, or clear log keyword cases:
 
 1. Identify project name, branch/version, module, key error words, and key filenames.
-2. Search only `<你的 Obsidian vault>\Codex\fix-patterns` for 1-3 relevant patterns.
+2. Search only `C:\Users\84365\Documents\Obsidian\CodexVault\Codex\fix-patterns` for 1-3 relevant patterns.
 3. Read only matching pattern files.
 4. If nothing matches, do not broaden to the whole vault.
 
@@ -46,6 +46,8 @@ After a reusable fix, update or create one concise `fix-patterns` note unless th
 1. Establish the baseline:
    - run `git status --short`
    - identify current branch with `git branch --show-current`
+   - capture current short commit with `git rev-parse --short HEAD`
+   - when a source commit is known, check whether it is already present with `git merge-base --is-ancestor <source-commit> HEAD`
    - locate source artifacts: branch, commit, exported folder, copied files, patch notes, screenshots, logs, or Markdown summary
    - note uncommitted user changes and avoid reverting them
 2. Compare source and target:
@@ -71,6 +73,9 @@ After a reusable fix, update or create one concise `fix-patterns` note unless th
 Before editing, produce or internally confirm:
 
 ```text
+当前分支/提交：
+dirty worktree：
+源提交是否已合入：
 源改动文件：
 目标对应文件：
 需要直接移植：
@@ -106,6 +111,8 @@ After the fix:
 记忆库：
 风险：
 ```
+
+For verification, use `asr3601-fix-verifier` when the target repo has a usable Git/build context. For reusable verified fixes, use `obsidian-fix-pattern-memory` to update `Codex/fix-patterns/` unless the user explicitly says not to record.
 
 ## Fix-Pattern Note Shape
 

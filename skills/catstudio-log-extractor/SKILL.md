@@ -1,6 +1,6 @@
 ---
 name: catstudio-log-extractor
-description: Extract and summarize ASR/CATStudio log packages for AI triage. Use when Codex receives CATStudio `.zip`, extracted CATStudio log folders, `.icl` logs, LogViewer exports, or requests to automatically export Device0 DIAG/App-DIAG/GKI/DSP data such as MMI/LOG, memory, crash, system, network, SIM, LTE, WiFi, GPS/location, power, CPU, or protocol traces without using the CATStudio GUI.
+description: Extract and summarize ASR/CATStudio log packages for AI triage and evidence-pack generation. Use when Codex receives CATStudio `.zip`, extracted CATStudio log folders, `.icl` logs, LogViewer exports, or requests to automatically export Device0 DIAG/App-DIAG/GKI/DSP data such as MMI/LOG, memory, crash, system, network, SIM, LTE, WiFi, GPS/location, power, CPU, or protocol traces without using the CATStudio GUI. Use --fast-evidence for the first pass; expand to --evidence-pack when broad crash/network/memory evidence is needed.
 ---
 
 # CATStudio Log Extractor
@@ -10,10 +10,38 @@ description: Extract and summarize ASR/CATStudio log packages for AI triage. Use
 Use the bundled script instead of placing tools in a firmware project:
 
 ```powershell
-python <CODEX_HOME>\skills\catstudio-log-extractor\scripts\extract_catstudio_logs.py "<CATStudio log.zip>" --profile mmi
+python C:\Users\84365\.codex\skills\catstudio-log-extractor\scripts\extract_catstudio_logs.py "<CATStudio log.zip>" --profile mmi
 ```
 
 Default output goes beside the input file. Use `--output-dir <dir>` for a separate destination.
+
+For broad or deep issue triage, use evidence-pack mode:
+
+```powershell
+python C:\Users\84365\.codex\skills\catstudio-log-extractor\scripts\extract_catstudio_logs.py "<CATStudio log.zip>" --evidence-pack --output-dir "<triage-output>"
+```
+
+This writes:
+
+- `*_catstudio_mmi.tsv`
+- `*_catstudio_crash.tsv`
+- `*_catstudio_network.tsv`
+- `*_catstudio_memory.tsv`
+- `*_catstudio_system.tsv`
+- `*_catstudio_summary.tsv`
+- `*_evidence.md`
+
+For a fast first pass, especially protocol, UI, micro-chat, APP command, or other MMI-heavy issues, use:
+
+```powershell
+python C:\Users\84365\.codex\skills\catstudio-log-extractor\scripts\extract_catstudio_logs.py "<CATStudio log.zip>" --fast-evidence --output-dir "<triage-output>"
+```
+
+This writes only the compact `mmi` TSV plus summary/evidence files, records default keyword hits, and reuses cached outputs when the same zip and options are run again. Add narrow keywords when known:
+
+```powershell
+python C:\Users\84365\.codex\skills\catstudio-log-extractor\scripts\extract_catstudio_logs.py "<CATStudio log.zip>" --fast-evidence --keyword TXT --keyword CHAT1 --output-dir "<triage-output>"
+```
 
 ## Profiles
 
@@ -28,7 +56,7 @@ Default output goes beside the input file. Use `--output-dir <dir>` for a separa
 Multiple profiles are allowed:
 
 ```powershell
-python <CODEX_HOME>\skills\catstudio-log-extractor\scripts\extract_catstudio_logs.py "<log.zip>" --profile mmi --profile memory --summary
+python C:\Users\84365\.codex\skills\catstudio-log-extractor\scripts\extract_catstudio_logs.py "<log.zip>" --profile mmi --profile memory --summary
 ```
 
 ## Custom Selection
@@ -63,9 +91,11 @@ Use `--require-keyword` to narrow a selected profile:
 
 ## Recommended Triage
 
-- Business/app/location/server issue: start with `--profile mmi`.
+- Business/app/protocol/UI/micro-chat issue: start with `--fast-evidence`.
+- Location/server issue: start with `--profile mmi`, then add `--profile network --require-keyword location` if MMI is insufficient.
 - Memory/catastrophic slowdown: `--profile mmi --profile memory --summary`.
 - Network/SIM/registration/data issue: `--profile mmi --profile network --require-keyword <specific term>` when possible.
 - Crash/reboot/fatal: `--profile mmi --profile crash --profile system --summary`.
+- Unknown firmware bug with attached CATStudio evidence: start with `--fast-evidence`, then expand to `--evidence-pack` only if MMI/keyword evidence is insufficient.
 
 After creating reusable findings from a log workflow, update the project fix-pattern memory if it is likely to recur across branches or projects.
