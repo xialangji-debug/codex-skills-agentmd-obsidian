@@ -1,6 +1,14 @@
 # Project Folder Map
 
-Use this file to map local projects/branches to fnOS domestic product folders. Add entries after the user confirms a mapping.
+Use this file to map local branches/version tokens to fnOS domestic product folders. Add entries after the user confirms a mapping.
+
+Mapping priority:
+
+1. User-provided `--remote-product-folder`.
+2. `branch_contains` exact/current branch tokens.
+3. `yl_device_ver_contains` as confirmation or disambiguation.
+4. `local_path` as a weak hint only. Do not reject a mapping only because the same branch is checked out under another local directory.
+5. Remote folder-name heuristic only when no confirmed branch/version mapping matches.
 
 ## Known Local Projects
 
@@ -113,11 +121,11 @@ note: Screenshot-confirmed mapping; branch name directly matches LT52 small-prog
 Add confirmed mappings in this format:
 
 ```text
-local_path: D:\XM\<repo>
 branch_contains: <keyword>
 yl_device_ver_contains: <keyword>
 fnos_folder: <folder under 团队文件 > 阿科奇 > 阿科奇-国内>
 verified: YYYY-MM-DD
+local_path: <optional weak hint; e.g. D:\XM\<repo>>
 ```
 
 Do not silently guess a folder if multiple TW10/TW18 folders match.

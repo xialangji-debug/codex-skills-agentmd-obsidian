@@ -73,7 +73,7 @@ Preferred fast path: use `scripts/akq_release.ps1` for normal releases. It perfo
 6. Upload to fnOS:
    - Open `https://fnos.yuelaniot.com:5667`.
    - Navigate through 文件管理 to `团队文件 > 阿科奇 > 阿科奇-国内`.
-   - Choose the correct product folder using branch/project evidence and `references/project-folder-map.md`.
+   - Choose the correct product folder using `references/project-folder-map.md`: explicit CLI folder first, exact/current branch mapping second, `yl_device_ver` as confirmation, and local path only as a weak hint. Do not let a different local checkout path block a branch/version-confirmed mapping.
    - Enter the release folder named exactly `YYYYMMDD_HHMM`.
    - If the release folder named exactly `YYYYMMDD_HHMM` does not exist under the confirmed product folder, create that final timestamp folder automatically.
    - Upload the renamed zip and renamed `.mdb.txt` automatically. Upload `readme.txt` only if it was user-provided.
@@ -132,5 +132,12 @@ node "$env:USERPROFILE\.codex\skills\akq-firmware-release\scripts\fnos_upload_re
 ```
 
 The upload script resolves the remote team/product/release folder by name and project mapping, creates only the final missing timestamp folder when needed, checks remote same-name collisions by listing the folder first, uploads zip/mdb files from `release_upload/<YYYYMMDD_HHMM>`, and verifies remote filenames and sizes. It refuses to create missing team/domestic/product folders; ask the user to confirm if those are missing or ambiguous. Pass `--readme <path>` only when the user explicitly provided the readme.
+
+Use `--resolve-only` to quickly verify release names and the mapped product folder without logging in or opening a browser:
+
+```powershell
+$env:NODE_PATH="$env:USERPROFILE\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules"
+node "$env:USERPROFILE\.codex\skills\akq-firmware-release\scripts\fnos_upload_release.js" --repo . --release-time 20260703_2002 --resolve-only
+```
 
 For compile-before-upload checks, pass `--preflight` to `scripts/fnos_upload_release.js`. For idempotent resume after an interrupted upload, pass `--allow-existing-identical` so remote files with matching names and sizes are skipped instead of treated as overwrite attempts.

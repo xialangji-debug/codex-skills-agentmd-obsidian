@@ -1,6 +1,6 @@
 ---
 name: catstudio-log-extractor
-description: Extract and summarize ASR/CATStudio log packages for AI triage and evidence-pack generation. Use when Codex receives CATStudio `.zip`, extracted CATStudio log folders, `.icl` logs, LogViewer exports, or requests to automatically export Device0 DIAG/App-DIAG/GKI/DSP data such as MMI/LOG, memory, crash, system, network, SIM, LTE, WiFi, GPS/location, power, CPU, or protocol traces without using the CATStudio GUI. Use --fast-evidence for the first pass; expand to --evidence-pack when broad crash/network/memory evidence is needed.
+description: Extract and summarize ASR/CATStudio log packages for AI triage and evidence-pack generation. Use when Codex receives CATStudio `.zip`, extracted CATStudio log folders, `.icl` logs, LogViewer exports, live CATStudio logging requests, automatic current-log capture, or device reboot/log recapture requests. Handles Device0 DIAG/App-DIAG/GKI/DSP data such as MMI/LOG, memory, crash, system, network, SIM, LTE, WiFi, GPS/location, power, CPU, or protocol traces without using the CATStudio GUI. Use --fast-evidence for the first pass; expand to --evidence-pack when broad crash/network/memory evidence is needed.
 ---
 
 # CATStudio Log Extractor
@@ -14,6 +14,27 @@ python C:\Users\84365\.codex\skills\catstudio-log-extractor\scripts\extract_cats
 ```
 
 Default output goes beside the input file. Use `--output-dir <dir>` for a separate destination.
+
+## Live CATStudio MCP
+
+When the user asks to grab the current device log, inspect live CATStudio state, list connected devices, or reboot the test device before/after a repro, prefer the local MCP server `catstudio_device` when available.
+
+Configured server:
+
+```text
+C:\Users\84365\.codex\mcp\catstudio-device\catstudio_device_mcp.py
+```
+
+Main tools:
+
+- `catstudio_status`: locate CATStudio, current `Bin Logs`, latest `.icl/.ild`, and latest DebugLog directory.
+- `list_catstudio_logs`: list recent CATStudio binary logs.
+- `grab_latest_catstudio_log`: copy the latest `.icl/.ild` pair and run this skill's extractor to create `mmi.tsv`, `summary.tsv`, and `evidence.md`.
+- `export_catstudio_log`: export a specific `.icl` file.
+- `list_connected_devices`: inspect ADB and serial COM devices.
+- `reboot_device`: reboot through explicit `adb` or `serial_at`; it refuses unless `confirm=true`.
+
+If the MCP tools are not visible in the current session, the configuration may have been added after Codex started. Use the script directly as a fallback, or restart/reload Codex to expose the MCP tools.
 
 For broad or deep issue triage, use evidence-pack mode:
 

@@ -9,3 +9,8 @@ __pycache__/
 usage.sqlite
 *.db
 *.sqlite
+*_config.json
+!*.example.json
+captures/
+runs/
+secrets/

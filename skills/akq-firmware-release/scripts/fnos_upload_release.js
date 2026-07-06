@@ -23,6 +23,7 @@ Options:
   --readme <path>                 User-provided readme.txt to upload.
   --include-readme                Include <upload-dir>/readme.txt if present.
   --remote-product-folder <name>  Product folder under 阿科奇-国内. Default: project-folder-map.md or heuristic.
+  --resolve-only                  Resolve release names and product folder, then exit without login/upload.
   --create-missing-folder         Deprecated alias; timestamp folders are created automatically for real uploads.
   --no-create-missing-folder      Refuse to create a missing timestamp release folder.
   --preflight                     Check login, product folder, release folder, and remote name collisions without local files.
@@ -53,6 +54,7 @@ function parseArgs(argv) {
     allowExistingIdentical: false,
     includeReadme: false,
     preflight: false,
+    resolveOnly: false,
     createMissingFolder: true,
   };
   for (let i = 2; i < argv.length; i++) {
@@ -84,6 +86,9 @@ function parseArgs(argv) {
         break;
       case "--remote-product-folder":
         args.remoteProductFolder = next();
+        break;
+      case "--resolve-only":
+        args.resolveOnly = true;
         break;
       case "--create-missing-folder":
         args.createMissingFolder = true;
@@ -212,24 +217,37 @@ function localPathMatches(rulePath, repo) {
 
 function chooseMappedProductFolder({ repo, branch, deviceVer, explicitFolder, skillDir }) {
   if (explicitFolder) return { folder: explicitFolder, source: "cli" };
-  const matches = parseProjectFolderMap(skillDir)
-    .filter((item) => localPathMatches(item.local_path, repo))
-    .filter((item) => !item.branch_contains || branch.includes(item.branch_contains))
-    .filter((item) => !item.yl_device_ver_contains || deviceVer.includes(item.yl_device_ver_contains));
-  if (matches.length === 1) {
-    return { folder: matches[0].fnos_folder, source: "project-folder-map.md" };
+  const mappings = parseProjectFolderMap(skillDir);
+  const scored = [];
+  for (const item of mappings) {
+    const branchRule = item.branch_contains || "";
+    const versionRule = item.yl_device_ver_contains || "";
+    const hasBranchOrVersionRule = !!branchRule || !!versionRule;
+    if (!hasBranchOrVersionRule) continue;
+    if (branchRule && !branch.includes(branchRule)) continue;
+    if (versionRule && !deviceVer.includes(versionRule)) continue;
+
+    let score = 0;
+    if (branchRule) score += 10000 + branchRule.length;
+    if (versionRule) score += 1000 + versionRule.length;
+    if (localPathMatches(item.local_path, repo)) score += 25;
+    scored.push({ ...item, score });
   }
-  if (matches.length > 1) {
-    matches.sort((a, b) => {
-      const aScore = (a.branch_contains || "").length + (a.yl_device_ver_contains || "").length;
-      const bScore = (b.branch_contains || "").length + (b.yl_device_ver_contains || "").length;
-      return bScore - aScore;
-    });
-    if (matches[0].fnos_folder !== matches[1].fnos_folder) {
-      fail(`Multiple remote product mappings matched. Pass --remote-product-folder.\n${matches.map((m) => `  ${m.fnos_folder}`).join("\n")}`);
+
+  scored.sort((a, b) => b.score - a.score);
+  if (scored.length === 1 || (scored.length > 1 && scored[0].score > scored[1].score)) {
+    return { folder: scored[0].fnos_folder, source: "project-folder-map.md (branch/version)" };
+  }
+  if (scored.length > 1) {
+    const topScore = scored[0].score;
+    const top = scored.filter((item) => item.score === topScore);
+    const folders = [...new Set(top.map((item) => item.fnos_folder))];
+    if (folders.length === 1) {
+      return { folder: folders[0], source: "project-folder-map.md (branch/version)" };
     }
-    return { folder: matches[0].fnos_folder, source: "project-folder-map.md" };
+    fail(`Multiple remote product mappings matched with the same branch/version score. Pass --remote-product-folder.\n${top.map((m) => `  ${m.fnos_folder} score=${m.score}`).join("\n")}`);
   }
+
   return { folder: "", source: "heuristic" };
 }
 
@@ -608,7 +626,7 @@ async function main() {
     explicitFolder: args.remoteProductFolder,
     skillDir,
   });
-  const localFiles = args.preflight ? expectedRemoteFiles(args, deviceVer) : chooseLocalFiles(args, repo, deviceVer, releaseTime);
+  const localFiles = (args.preflight || args.resolveOnly) ? expectedRemoteFiles(args, deviceVer) : chooseLocalFiles(args, repo, deviceVer, releaseTime);
 
   console.log(`repo: ${repo}`);
   console.log(`branch: ${branch}`);
@@ -616,10 +634,14 @@ async function main() {
   console.log(`yl_device_ver: ${deviceVer}`);
   console.log(`release_time: ${releaseTime}`);
   console.log(`remote_product_folder: ${mapping.folder || "(heuristic)"} (${mapping.source})`);
-  console.log(args.preflight ? "expected_remote_files:" : "local_files:");
+  console.log((args.preflight || args.resolveOnly) ? "expected_remote_files:" : "local_files:");
   for (const file of localFiles) {
     const sizeText = typeof file.size === "number" ? ` (${file.size} bytes)` : "";
     console.log(`  ${file.name}${sizeText}`);
+  }
+  if (args.resolveOnly) {
+    console.log("resolve_only: no login, preflight, or upload performed.");
+    return;
   }
 
   const credentials = loadCredentials();

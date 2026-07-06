@@ -2,6 +2,7 @@ param(
   [string]$CodexHome = "$env:USERPROFILE\.codex",
   [string]$VaultPath = "$env:USERPROFILE\Documents\Obsidian\CodexVault",
   [switch]$SkipSkills,
+  [switch]$SkipMcp,
   [switch]$SkipAgents,
   [switch]$SkipObsidian,
   [switch]$SkipObsidianInstall
@@ -11,6 +12,7 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $SkillsSource = Join-Path $RepoRoot "skills"
+$McpSource = Join-Path $RepoRoot "mcp"
 $AgentsSource = Join-Path $RepoRoot "AGENTS.md"
 $ObsidianSource = Join-Path $RepoRoot "obsidian\Codex"
 
@@ -83,6 +85,77 @@ function Copy-DirectoryContents {
   }
 }
 
+function Get-PythonCommand {
+  $runtimePython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+  if (Test-Path -LiteralPath $runtimePython) {
+    return $runtimePython
+  }
+
+  $python = Get-Command "python" -ErrorAction SilentlyContinue
+  if ($python) {
+    return $python.Source
+  }
+
+  return "python"
+}
+
+function Add-McpServerConfig {
+  param(
+    [Parameter(Mandatory=$true)][string]$ConfigPath,
+    [Parameter(Mandatory=$true)][string]$ServerName,
+    [Parameter(Mandatory=$true)][string]$PythonCommand,
+    [Parameter(Mandatory=$true)][string]$ScriptPath
+  )
+
+  New-Item -ItemType Directory -Path (Split-Path -Parent $ConfigPath) -Force | Out-Null
+  if (-not (Test-Path -LiteralPath $ConfigPath)) {
+    New-Item -ItemType File -Path $ConfigPath -Force | Out-Null
+  }
+
+  $content = Get-Content -LiteralPath $ConfigPath -Raw
+  $sectionPattern = "(?m)^\[mcp_servers\.$([regex]::Escape($ServerName))\]"
+  if ($content -match $sectionPattern) {
+    Write-Host "MCP config already exists: $ServerName"
+    return
+  }
+
+  $block = @"
+
+[mcp_servers.$ServerName]
+command = '$PythonCommand'
+args = ['$ScriptPath']
+startup_timeout_sec = 30
+"@
+
+  Add-Content -LiteralPath $ConfigPath -Value $block -Encoding UTF8
+  Write-Host "Added MCP config: $ServerName"
+}
+
+function Install-McpTools {
+  if ($SkipMcp -or -not (Test-Path -LiteralPath $McpSource)) {
+    return
+  }
+
+  $mcpDest = Join-Path $CodexHome "mcp"
+  New-Item -ItemType Directory -Path $mcpDest -Force | Out-Null
+
+  Get-ChildItem -LiteralPath $McpSource -Directory | ForEach-Object {
+    $targetDir = Join-Path $mcpDest $_.Name
+    New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    Get-ChildItem -LiteralPath $_.FullName -File | Where-Object { $_.Name -notmatch '_config\.json$' } | ForEach-Object {
+      Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $targetDir $_.Name) -Force
+    }
+  }
+
+  $pythonCommand = Get-PythonCommand
+  $configToml = Join-Path $CodexHome "config.toml"
+  Add-McpServerConfig -ConfigPath $configToml -ServerName "catstudio_device" -PythonCommand $pythonCommand -ScriptPath (Join-Path $mcpDest "catstudio-device\catstudio_device_mcp.py")
+  Add-McpServerConfig -ConfigPath $configToml -ServerName "aboot_download" -PythonCommand $pythonCommand -ScriptPath (Join-Path $mcpDest "aboot-download\aboot_download_mcp.py")
+
+  Write-Host "Installed MCP tools to $mcpDest"
+  Write-Host "If needed, copy each *.example.json to *_config.json and edit local tool paths."
+}
+
 Ensure-ObsidianInstalled
 
 if (-not $SkipSkills) {
@@ -91,6 +164,8 @@ if (-not $SkipSkills) {
   Copy-DirectoryContents -Source $SkillsSource -Destination $skillsDest -Overwrite
   Write-Host "Installed skills to $skillsDest"
 }
+
+Install-McpTools
 
 if (-not $SkipAgents) {
   New-Item -ItemType Directory -Path $CodexHome -Force | Out-Null

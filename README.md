@@ -5,11 +5,12 @@
 这是一个可移植的 Codex 配置包，包含：
 
 - 一组可直接安装到 Codex 的 `skills/`
+- 可选 MCP 工具：CATStudio 日志/设备辅助、AbootDownload 安全烧录辅助
 - 通用版 `AGENTS.md`，用于约束 Codex 如何按需使用 Obsidian Markdown 记忆库
 - 一个空的 Obsidian 记忆库模板，适合别人从零开始建立项目记忆
-- Windows 一键安装脚本 `scripts/install.ps1`，会在未检测到 Obsidian 时先尝试安装 Obsidian
+- Windows 一键安装脚本 `scripts/install.ps1`，会在未检测到 Obsidian 时先尝试安装 Obsidian，并把 MCP 配置追加到 Codex `config.toml`
 
-本仓库不包含私人 Obsidian 笔记、聊天记录、账号令牌、密钥或本机绝对路径。发布前已将个人路径改为占位符。
+本仓库不包含私人 Obsidian 笔记、聊天记录、账号令牌、密钥或 MCP 本机私有配置。少量 skill 示例会保留可替换的本机路径写法，真正的密码、token 和私有配置不要提交。
 
 ## 目录结构
 
@@ -31,6 +32,9 @@
 ├── scripts/
 │   ├── install.ps1
 │   └── install.sh
+├── mcp/
+│   ├── aboot-download/
+│   └── catstudio-device/
 └── skills/
 ```
 
@@ -46,10 +50,22 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 
 脚本会先检测本机是否安装 Obsidian；如果没有，会尝试通过 `winget install Obsidian.Obsidian` 安装。没有 `winget` 时，脚本会提示手动安装地址。
 
+Windows 脚本默认还会复制 `mcp/` 到 `%USERPROFILE%\.codex\mcp`，并在 `%USERPROFILE%\.codex\config.toml` 里追加：
+
+- `catstudio_device`：查找、复制、导出 CATStudio 日志，辅助查看 ADB/串口设备
+- `aboot_download`：查找 release 包、检查 AbootDownload/adownload、生成烧录命令，只有显式确认才会执行烧录
+
+如不需要 MCP：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -SkipMcp
+```
+
 默认会安装到：
 
 ```text
 %USERPROFILE%\.codex\skills
+%USERPROFILE%\.codex\mcp
 %USERPROFILE%\.codex\AGENTS.md
 %USERPROFILE%\Documents\Obsidian\CodexVault\Codex
 ```
@@ -65,7 +81,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 `
 只安装 skills：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -SkipAgents -SkipObsidian
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -SkipAgents -SkipObsidian -SkipMcp
 ```
 
 如果你已经自己安装 Obsidian，或者只想复制模板、不希望脚本安装 Obsidian：
@@ -84,6 +100,8 @@ bash scripts/install.sh
 
 macOS / Linux 脚本不会自动安装 Obsidian。需要 Obsidian 的话，请先从官网安装：<https://obsidian.md/download>。
 
+macOS / Linux 脚本默认不安装 MCP，因为当前 MCP 主要服务 Windows 上的 CATStudio 和 AbootDownload。如果只想复制 MCP 文件，可设置 `INSTALL_MCP=1` 后手动配置 Codex。
+
 也可以指定路径：
 
 ```bash
@@ -94,7 +112,8 @@ CODEX_HOME="$HOME/.codex" OBSIDIAN_VAULT="$HOME/Documents/Obsidian/CodexVault" b
 
 1. 重新打开 Codex，让它重新加载 skills。
 2. 如果你使用 Obsidian，打开安装后的 vault。
-3. 根据自己的项目，把长期可复用信息写到：
+3. 如果启用 MCP，重启 Codex 后查看工具是否出现；如本机工具路径不同，把对应 `*.example.json` 复制为 `*_config.json` 后修改路径，或使用环境变量覆盖路径。
+4. 根据自己的项目，把长期可复用信息写到：
    - `Codex/projects/`
    - `Codex/people/`
    - `Codex/notes/`
@@ -117,7 +136,7 @@ CODEX_HOME="$HOME/.codex" OBSIDIAN_VAULT="$HOME/Documents/Obsidian/CodexVault" b
 
 这个仓库只提供可复用配置、技能和空模板。
 
-安装后你自己产生的 Obsidian 笔记不会自动上传到这个仓库。请不要把真实项目机密、账号、token、客户信息或私人聊天原文提交到 Git。
+安装后你自己产生的 Obsidian 笔记、MCP 本机配置和抓取日志不会自动上传到这个仓库。请不要把真实项目机密、账号、密码、token、客户信息、私有附件或私人聊天原文提交到 Git。
 
 ## 更新
 

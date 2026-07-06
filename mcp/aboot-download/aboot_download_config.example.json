@@ -1,0 +1,10 @@
+{
+  "aboot_root": "C:\\Path\\To\\aboot-tools-win-x64",
+  "run_log_root": "%USERPROFILE%\\.codex\\aboot-download\\runs",
+  "default_search_roots": [
+    "%USERPROFILE%\\.codex\\worktrees",
+    "%USERPROFILE%\\Downloads"
+  ],
+  "default_baudrate": 115200,
+  "default_timeout_sec": 900
+}

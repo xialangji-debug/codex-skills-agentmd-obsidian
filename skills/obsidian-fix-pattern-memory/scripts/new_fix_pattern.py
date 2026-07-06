@@ -57,35 +57,35 @@ def build_note(args: argparse.Namespace, cwd: Path) -> str:
 
 ## 关键词
 
-- TODO
+-
 
 ## 适用范围
 
-- TODO
+-
 
 ## 症状
 
-- TODO
+-
 
 ## 根因
 
-- TODO
+-
 
 ## 关键文件和函数
 
-- TODO
+-
 
 ## 修复思路
 
-- TODO
+-
 
 ## 验证方法
 
-- TODO
+-
 
 ## 注意事项
 
-- TODO
+-
 """
 
 
