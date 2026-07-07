@@ -11,6 +11,8 @@ param(
   [switch]$NoUpload,
   [switch]$ForceCleanBuild,
   [switch]$TrustExistingPackage,
+  [switch]$NoReadme,
+  [switch]$AllowUntrackedSource,
   [switch]$DryRun,
   [switch]$ReplaceExisting,
   [switch]$Headed
@@ -97,6 +99,121 @@ function Get-SourceHash {
   } finally {
     $sha.Dispose()
   }
+}
+
+function Get-GitStatusLines {
+  param([string]$RepoPath)
+  $text = Get-GitText -RepoPath $RepoPath -Arguments @("status", "--short")
+  if ([string]::IsNullOrWhiteSpace($text)) {
+    return @()
+  }
+  return @($text -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+
+function Test-IsSourceLikePath {
+  param([string]$PathValue)
+  $normalized = $PathValue -replace '\\', '/'
+  if ($normalized -match '^(out|build|\.cache|release_upload|logs?)/') {
+    return $false
+  }
+  if ($normalized -match '^(gui|app|apps|product|services|middleware|driver|drivers|hal|inc|include|src|platform|components|custom|config)/') {
+    return $true
+  }
+  if ($normalized -match '(^|/)(CMakeLists\.txt|Kconfig|Makefile)$') {
+    return $true
+  }
+  return ($normalized -match '\.(c|h|cc|cpp|cxx|hpp|s|S|asm|ld|cmake|mk|json|bin)$')
+}
+
+function Assert-NoUntrackedSourceBeforeClean {
+  param(
+    [string]$RepoPath,
+    [bool]$Allow
+  )
+  if ($Allow) {
+    return
+  }
+  $untrackedSource = @()
+  foreach ($line in Get-GitStatusLines -RepoPath $RepoPath) {
+    if ($line.StartsWith("?? ")) {
+      $pathValue = $line.Substring(3).Trim()
+      if (Test-IsSourceLikePath -PathValue $pathValue) {
+        $untrackedSource += $pathValue
+      }
+    }
+  }
+  if ($untrackedSource.Count -gt 0) {
+    $listing = ($untrackedSource | ForEach-Object { "  $_" }) -join "`n"
+    throw "Untracked source-like files exist and may be lost or omitted during clean release builds. Commit/stage them first, or rerun with -AllowUntrackedSource only if intentional.`n$listing"
+  }
+}
+
+function Convert-MarkdownReleaseNotesToPlainText {
+  param([string]$Markdown)
+  $text = $Markdown
+  $text = $text -replace '\r\n', "`n"
+  $text = $text -replace '\r', "`n"
+  $text = $text -replace '```[a-zA-Z0-9_-]*\n([\s\S]*?)```', '$1'
+  $text = $text -replace '\|', ' '
+  $text = $text -replace '`([^`]*)`', '$1'
+  $text = $text -replace '\*\*([^*]*)\*\*', '$1'
+  $text = $text -replace '(?m)^\s*\|?\s*-+\s*(\|\s*-+\s*)+\|?\s*$', ''
+  $text = $text -replace '(?m)^\s*#+\s*', ''
+  $text = $text -replace '\n{3,}', "`n`n"
+  return $text.Trim()
+}
+
+function Get-TopReadmeSection {
+  param([string]$RepoPath)
+  $readmePath = Join-Path $RepoPath "README.md"
+  if (-not (Test-Path -LiteralPath $readmePath -PathType Leaf)) {
+    return ""
+  }
+  $text = Get-Content -LiteralPath $readmePath -Raw
+  $matches = [regex]::Matches($text, "(?ms)^##\s+.*?(?=^##\s+|\z)")
+  if ($matches.Count -lt 1) {
+    return ""
+  }
+  return $matches[0].Value.Trim()
+}
+
+function New-DefaultReleaseReadme {
+  param(
+    [string]$RepoPath,
+    [string]$OutputPath,
+    [string]$ReleaseTimeValue,
+    [string]$DeviceVer,
+    [string]$Branch,
+    [string]$Commit
+  )
+  $section = Get-TopReadmeSection -RepoPath $RepoPath
+  $commitLines = Get-GitText -RepoPath $RepoPath -Arguments @("log", "--oneline", "-5")
+  $content = @()
+  $content += "TW10 C10 版本修复记录"
+  $content += ""
+  $content += "版本时间：$ReleaseTimeValue"
+  $content += "版本号：$DeviceVer"
+  $content += "分支：$Branch"
+  $content += "发版提交：$Commit"
+  $content += ""
+  if (-not [string]::IsNullOrWhiteSpace($section)) {
+    $content += "README 最新记录："
+    $content += Convert-MarkdownReleaseNotesToPlainText -Markdown $section
+    $content += ""
+  }
+  $content += "最近提交："
+  if ([string]::IsNullOrWhiteSpace($commitLines)) {
+    $content += "(不可用)"
+  } else {
+    $content += @($commitLines -split "`r?`n")
+  }
+
+  $dir = Split-Path -Parent $OutputPath
+  if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
+    New-Item -ItemType Directory -Path $dir | Out-Null
+  }
+  ($content -join "`r`n") | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+  Write-Host "Generated release readme: $OutputPath"
 }
 
 function Get-JsonProperty {
@@ -274,7 +391,9 @@ $ProductDir = Join-Path $RepoPath "out\product\$Target"
 $UploadDir = Join-Path $ProductDir "release_upload\$ReleaseTime"
 $ExpectedZip = Join-Path $UploadDir "$IntendedDeviceVer.zip"
 $ExpectedMdb = Join-Path $UploadDir "$IntendedDeviceVer.mdb.txt"
+$ExpectedReadme = Join-Path $UploadDir "readme.txt"
 $StatePath = Join-Path $UploadDir ".akq_release_state.json"
+$IncludeReadme = -not $NoReadme
 $State = Read-ReleaseState -StatePath $StatePath
 $StatePlanMatches = Test-StatePlanMatch -State $State -RepoPath $RepoPath -Branch $Branch -Commit $Commit -ReleaseTimeValue $ReleaseTime -DeviceVer $IntendedDeviceVer -TargetValue $Target -PSModeValue $PSMode -TargetOSValue $TargetOS -ChipIdValue $ChipId
 $StateSaysUploaded = $StatePlanMatches -and ((Get-JsonProperty $State "upload_succeeded") -eq $true)
@@ -294,16 +413,20 @@ if (-not [string]::IsNullOrWhiteSpace($RemoteProductFolder)) {
 }
 if (-not [string]::IsNullOrWhiteSpace($Readme)) {
   $UploadBaseArgs += "--include-readme"
+} elseif ($IncludeReadme) {
+  $UploadBaseArgs += "--include-readme"
 }
 if ($Headed) {
   $UploadBaseArgs += "--headed"
 }
 
-if (-not $NoPreflight -and -not $StateSaysUploaded) {
+if (-not $NoPreflight -and -not $StateSaysUploaded -and -not $TrustExistingPackage) {
   $preflightArgs = @($UploadBaseArgs + "--preflight")
   Invoke-Checked -Command $Node -Arguments $preflightArgs -WorkingDirectory $RepoPath -Environment @{ NODE_PATH = $BundledNodePath }
 } elseif ($StateSaysUploaded) {
   Write-Host "resume: previous state says upload already succeeded; final upload step will verify identical remote files."
+} elseif ($TrustExistingPackage) {
+  Write-Host "resume: trusting existing package; skipping collision-only preflight and verifying in upload step."
 }
 
 $updateArgs = @($PrepareScript, "--repo", $RepoPath, "--release-time", $ReleaseTime, "--update-yl-only")
@@ -347,9 +470,12 @@ if ($packageStateOk -and -not $ForceCleanBuild) {
   if ($buildStateOk -and -not $ForceCleanBuild) {
     Write-Host "resume: build already succeeded for the same source state; skipping clean/build."
   } else {
+    Assert-NoUntrackedSourceBeforeClean -RepoPath $RepoPath -Allow ([bool]$AllowUntrackedSource)
     Invoke-Checked -Command "make" -Arguments @("clean") -WorkingDirectory $RepoPath -Environment $buildEnv
     Invoke-Checked -Command "make" -Arguments @($Target) -WorkingDirectory $RepoPath -Environment $buildEnv
-    Save-ReleaseState -StatePath $StatePath -OldState $State -StageName "build" -RepoPath $RepoPath -Branch $Branch -Commit $Commit -SourceHash $SourceHash -ReleaseTimeValue $ReleaseTime -DeviceVer $IntendedDeviceVer -TargetValue $Target -PSModeValue $PSMode -TargetOSValue $TargetOS -ChipIdValue $ChipId -UploadDir $UploadDir -Files @($ExpectedZip, $ExpectedMdb)
+    $stateFiles = @($ExpectedZip, $ExpectedMdb)
+    if ($IncludeReadme) { $stateFiles += $ExpectedReadme }
+    Save-ReleaseState -StatePath $StatePath -OldState $State -StageName "build" -RepoPath $RepoPath -Branch $Branch -Commit $Commit -SourceHash $SourceHash -ReleaseTimeValue $ReleaseTime -DeviceVer $IntendedDeviceVer -TargetValue $Target -PSModeValue $PSMode -TargetOSValue $TargetOS -ChipIdValue $ChipId -UploadDir $UploadDir -Files $stateFiles
     $State = Read-ReleaseState -StatePath $StatePath
   }
 
@@ -359,8 +485,14 @@ if ($packageStateOk -and -not $ForceCleanBuild) {
     $packageArgs += @("--readme", $ReadmePath)
   }
   Invoke-Checked -Command $Python -Arguments $packageArgs -WorkingDirectory $RepoPath
-  Save-ReleaseState -StatePath $StatePath -OldState $State -StageName "package" -RepoPath $RepoPath -Branch $Branch -Commit $Commit -SourceHash $SourceHash -ReleaseTimeValue $ReleaseTime -DeviceVer $IntendedDeviceVer -TargetValue $Target -PSModeValue $PSMode -TargetOSValue $TargetOS -ChipIdValue $ChipId -UploadDir $UploadDir -Files @($ExpectedZip, $ExpectedMdb)
+  $stateFiles = @($ExpectedZip, $ExpectedMdb)
+  if ($IncludeReadme) { $stateFiles += $ExpectedReadme }
+  Save-ReleaseState -StatePath $StatePath -OldState $State -StageName "package" -RepoPath $RepoPath -Branch $Branch -Commit $Commit -SourceHash $SourceHash -ReleaseTimeValue $ReleaseTime -DeviceVer $IntendedDeviceVer -TargetValue $Target -PSModeValue $PSMode -TargetOSValue $TargetOS -ChipIdValue $ChipId -UploadDir $UploadDir -Files $stateFiles
   $State = Read-ReleaseState -StatePath $StatePath
+}
+
+if ($IncludeReadme -and [string]::IsNullOrWhiteSpace($Readme)) {
+  New-DefaultReleaseReadme -RepoPath $RepoPath -OutputPath $ExpectedReadme -ReleaseTimeValue $ReleaseTime -DeviceVer $IntendedDeviceVer -Branch $Branch -Commit $Commit
 }
 
 if ($NoUpload) {
@@ -374,5 +506,7 @@ if ($ReplaceExisting) {
 }
 Invoke-Checked -Command $Node -Arguments $uploadArgs -WorkingDirectory $RepoPath -Environment @{ NODE_PATH = $BundledNodePath }
 
-Save-ReleaseState -StatePath $StatePath -OldState $State -StageName "upload" -RepoPath $RepoPath -Branch $Branch -Commit $Commit -SourceHash $SourceHash -ReleaseTimeValue $ReleaseTime -DeviceVer $IntendedDeviceVer -TargetValue $Target -PSModeValue $PSMode -TargetOSValue $TargetOS -ChipIdValue $ChipId -UploadDir $UploadDir -Files @($ExpectedZip, $ExpectedMdb)
+$stateFiles = @($ExpectedZip, $ExpectedMdb)
+if ($IncludeReadme) { $stateFiles += $ExpectedReadme }
+Save-ReleaseState -StatePath $StatePath -OldState $State -StageName "upload" -RepoPath $RepoPath -Branch $Branch -Commit $Commit -SourceHash $SourceHash -ReleaseTimeValue $ReleaseTime -DeviceVer $IntendedDeviceVer -TargetValue $Target -PSModeValue $PSMode -TargetOSValue $TargetOS -ChipIdValue $ChipId -UploadDir $UploadDir -Files $stateFiles
 Write-Host "done: release uploaded and verified."

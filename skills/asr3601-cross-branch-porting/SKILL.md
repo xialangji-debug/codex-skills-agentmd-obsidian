@@ -63,6 +63,7 @@ After a reusable fix, update or create one concise `fix-patterns` note unless th
    - preserve watch/phone/sport variant boundaries
    - reuse existing resource naming, text IDs, image registration, and build macros
    - avoid broad refactors while porting
+   - after adding new source/resource files, immediately re-run `git status --short` and make sure every required new file is either tracked or explicitly staged before any clean build/release flow. Do not leave required `??` files vulnerable to clean/release scripts.
 5. Verify:
    - prefer the target's documented build or simulator command
    - if full build is unavailable, run focused syntax/search checks and explain the gap
@@ -83,6 +84,7 @@ dirty worktree：
 不移植：
 风险点：
 验证命令：
+新增文件保护：
 ```
 
 For UI/resources, check image/resource indexes, language text tables, page registration, refresh paths, and screen resolution. For timers/power/alarm/contact/protocol behavior, check storage, parse, event dispatch, UI confirmation, timeout callbacks, and reboot/resume paths.
@@ -108,6 +110,7 @@ After the fix:
 适配点：
 影响范围：
 验证：
+提交/暂存状态：
 记忆库：
 风险：
 ```
