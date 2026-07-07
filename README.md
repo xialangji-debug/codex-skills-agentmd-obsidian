@@ -4,8 +4,8 @@
 
 这是一个可移植的 Codex 配置包，包含：
 
-- 一组可直接安装到 Codex 的 `skills/`
-- 可选 MCP 工具：CATStudio 日志/设备辅助、AbootDownload 安全烧录辅助
+- 一组可直接安装到 Codex 的 `skills/`，当前同步 49 个本机自定义 skill
+- 可选 MCP 工具：CATStudio 日志/设备辅助、AbootDownload 安全烧录辅助、WeFlow 聊天导出辅助
 - 通用版 `AGENTS.md`，用于约束 Codex 如何按需使用 Obsidian Markdown 记忆库
 - 一个空的 Obsidian 记忆库模板，适合别人从零开始建立项目记忆
 - Windows 一键安装脚本 `scripts/install.ps1`，会在未检测到 Obsidian 时先尝试安装 Obsidian，并把 MCP 配置追加到 Codex `config.toml`
@@ -34,9 +34,24 @@
 │   └── install.sh
 ├── mcp/
 │   ├── aboot-download/
-│   └── catstudio-device/
+│   ├── catstudio-device/
+│   └── weflow-export/
 └── skills/
 ```
+
+## 当前同步快照
+
+- 更新时间：2026-07-07
+- Skills：49 个本机自定义 skill，未包含 Codex 内置 `.system` skill
+- MCP：`aboot-download`、`catstudio-device`、`weflow-export`
+- 未发布的本机 MCP：`node_repl` 属于 Codex App 内置运行时，不作为仓库 MCP 分发
+
+<details>
+<summary>已同步 skills</summary>
+
+`akq-firmware-release`, `asr3601-bug-intake-orchestrator`, `asr3601-cross-branch-porting`, `asr3601-fix-verifier`, `asr3601-lvgl-firmware-triage`, `catstudio-log-extractor`, `code-review`, `codebase-design`, `codex-ccswitch-mobile`, `codex-clash-proxy`, `codex-windows-fast-patch`, `diagnosing-bugs`, `domain-modeling`, `find-skills`, `grill-with-docs`, `implement`, `improve-codebase-architecture`, `karpathy-guidelines`, `mermaid-visualizer`, `model-release-radar`, `obsidian-fix-pattern-memory`, `pdf`, `playwright`, `playwright-interactive`, `prototype`, `research`, `resolving-merge-conflicts`, `screenshot`, `skill-usage-tracker`, `speech`, `tdd`, `to-issues`, `to-prd`, `transcribe`, `triage`, `ui-ux-pro-max`, `understand`, `understand-chat`, `understand-dashboard`, `understand-diff`, `understand-domain`, `understand-explain`, `understand-knowledge`, `understand-onboard`, `wechat-chat-export`, `weflow-chat-export-analysis`, `yeet`, `zentao-bug-resolver`, `zentao-bug-triage`
+
+</details>
 
 ## 快速安装（Windows）
 
@@ -54,6 +69,7 @@ Windows 脚本默认还会复制 `mcp/` 到 `%USERPROFILE%\.codex\mcp`，并在 
 
 - `catstudio_device`：查找、复制、导出 CATStudio 日志，辅助查看 ADB/串口设备
 - `aboot_download`：查找 release 包、检查 AbootDownload/adownload、生成烧录命令，只有显式确认才会执行烧录
+- `weflow-export`：诊断 WeFlow 本机 HTTP API，并导出微信聊天为 JSONL、Markdown 或 CSV
 
 如不需要 MCP：
 
@@ -100,7 +116,7 @@ bash scripts/install.sh
 
 macOS / Linux 脚本不会自动安装 Obsidian。需要 Obsidian 的话，请先从官网安装：<https://obsidian.md/download>。
 
-macOS / Linux 脚本默认不安装 MCP，因为当前 MCP 主要服务 Windows 上的 CATStudio 和 AbootDownload。如果只想复制 MCP 文件，可设置 `INSTALL_MCP=1` 后手动配置 Codex。
+macOS / Linux 脚本默认不安装 MCP，因为当前 MCP 主要服务 Windows 上的 CATStudio、AbootDownload 和 WeFlow。如果只想复制 MCP 文件，可设置 `INSTALL_MCP=1` 后手动配置 Codex。
 
 也可以指定路径：
 

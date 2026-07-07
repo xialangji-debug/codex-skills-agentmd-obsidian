@@ -1,6 +1,6 @@
 ---
 name: zentao-bug-triage
-description: Login to YueLan Zentao, fetch assigned or project bugs by current firmware branch/version, open each selected bug detail, parse history records and latest reactivation notes, download attachments/logs, inspect current-branch code one bug at a time, compare bug creation/update/reactivation time with relevant git commits to judge whether it was already fixed, save local bug/requirement snapshots, classify each issue as UI, app/protocol, low-level, platform, or unclear, estimate difficulty, and produce a cautious action table before any code changes. Use when working in ASR3601/ASR3602/360x Crane/LVGL firmware projects and the user says 当前bug, 看看当前bug, 当前分支bug, 有哪些bug, 禅道, Zentao, 抓bug, 版本bug, 需求差异, 下载日志, Bug分类, 一个个查代码, 判断修复过没有, 激活后还有问题, or asks whether assigned bugs can be handled.
+description: Login to YueLan Zentao, fetch assigned or project bugs by current firmware branch/version, open selected bug IDs, parse history and latest activation notes, download attachments/logs, save local snapshots, classify each issue, and produce a cautious action table before code changes. Use when working in ASR3601/ASR3602/360x Crane/LVGL firmware projects and the user asks to fetch/list/deep-fetch Zentao bugs, such as 当前bug, 看看当前bug, 当前分支bug, 有哪些bug, 禅道, Zentao, 抓bug, 版本bug, 需求差异, 下载日志, Bug分类, 一个个查代码, bug ID inspection, or assigned bugs. For already-provided concrete bug reports or downloaded detail text where no Zentao fetch is needed, route through asr3601-bug-intake-orchestrator first.
 ---
 
 # Zentao Bug Triage
@@ -28,6 +28,8 @@ Use this skill to turn Zentao bugs into a branch-aware triage table before editi
 ## Trigger and Scope Rule
 
 - Treat short requests such as “看看当前bug”, “当前bug”, “这个分支有哪些bug”, and “看禅道bug” as this workflow when the current workspace or version tokens indicate an ASR3601/ASR3602/360x Crane/LVGL firmware project.
+- Treat requests to open bug IDs, download attachments, refresh snapshots, or inspect `work-items.md` as this workflow.
+- If the user already pasted full bug steps/result/expected text or provided a local attachment path and does not need Zentao fetching, use `asr3601-bug-intake-orchestrator` first; re-enter this skill only if additional Zentao history or attachments are needed.
 - Recognize these workspace/version clues: `gui/lv_watch`, `product/craneg_modem`, `yl.h`, `yl_device_ver`, `yl_hw_ver`, `ASR3601`, `ASR3602`, `3601`, `3602`, `360x`, `crane`, `TW10`, `TW18`, `C10`, `LT52`, `JC2`, `JC8`.
 - If the same short request appears outside this firmware family, ask one short confirmation before logging in to Zentao.
 - When both `asr3601-lvgl-firmware-triage` and this skill apply, use firmware triage for code reasoning and this skill for Zentao fetching, bug detail snapshots, attachments, classification, and time-vs-commit judgment.

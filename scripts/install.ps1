@@ -99,12 +99,26 @@ function Get-PythonCommand {
   return "python"
 }
 
+function Get-NodeCommand {
+  $runtimeNode = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
+  if (Test-Path -LiteralPath $runtimeNode) {
+    return $runtimeNode
+  }
+
+  $node = Get-Command "node" -ErrorAction SilentlyContinue
+  if ($node) {
+    return $node.Source
+  }
+
+  return "node"
+}
+
 function Add-McpServerConfig {
   param(
     [Parameter(Mandatory=$true)][string]$ConfigPath,
     [Parameter(Mandatory=$true)][string]$ServerName,
-    [Parameter(Mandatory=$true)][string]$PythonCommand,
-    [Parameter(Mandatory=$true)][string]$ScriptPath
+    [Parameter(Mandatory=$true)][string]$Command,
+    [Parameter(Mandatory=$true)][string[]]$Args
   )
 
   New-Item -ItemType Directory -Path (Split-Path -Parent $ConfigPath) -Force | Out-Null
@@ -119,11 +133,13 @@ function Add-McpServerConfig {
     return
   }
 
+  $argsText = ($Args | ForEach-Object { "'$_'" }) -join ", "
+
   $block = @"
 
 [mcp_servers.$ServerName]
-command = '$PythonCommand'
-args = ['$ScriptPath']
+command = '$Command'
+args = [$argsText]
 startup_timeout_sec = 30
 "@
 
@@ -148,9 +164,11 @@ function Install-McpTools {
   }
 
   $pythonCommand = Get-PythonCommand
+  $nodeCommand = Get-NodeCommand
   $configToml = Join-Path $CodexHome "config.toml"
-  Add-McpServerConfig -ConfigPath $configToml -ServerName "catstudio_device" -PythonCommand $pythonCommand -ScriptPath (Join-Path $mcpDest "catstudio-device\catstudio_device_mcp.py")
-  Add-McpServerConfig -ConfigPath $configToml -ServerName "aboot_download" -PythonCommand $pythonCommand -ScriptPath (Join-Path $mcpDest "aboot-download\aboot_download_mcp.py")
+  Add-McpServerConfig -ConfigPath $configToml -ServerName "catstudio_device" -Command $pythonCommand -Args @((Join-Path $mcpDest "catstudio-device\catstudio_device_mcp.py"))
+  Add-McpServerConfig -ConfigPath $configToml -ServerName "aboot_download" -Command $pythonCommand -Args @((Join-Path $mcpDest "aboot-download\aboot_download_mcp.py"))
+  Add-McpServerConfig -ConfigPath $configToml -ServerName "weflow-export" -Command $nodeCommand -Args @((Join-Path $mcpDest "weflow-export\weflow_export_mcp_server.js"))
 
   Write-Host "Installed MCP tools to $mcpDest"
   Write-Host "If needed, copy each *.example.json to *_config.json and edit local tool paths."

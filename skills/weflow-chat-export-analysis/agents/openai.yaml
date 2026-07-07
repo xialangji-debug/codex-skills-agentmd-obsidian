@@ -1,0 +1,4 @@
+interface:
+  display_name: "WeFlow Chat Export Analysis"
+  short_description: "本机导出 WeFlow/微信聊天记录、图片索引和分析材料"
+  default_prompt: "Use $weflow-chat-export-analysis to export and analyze a local WeFlow group chat."

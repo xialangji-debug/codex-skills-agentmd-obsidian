@@ -1,0 +1,4 @@
+interface:
+  display_name: "ASR3601 Bug Intake"
+  short_description: "ASR3601 bug intake and routing workflow"
+  default_prompt: "Use $asr3601-bug-intake-orchestrator to classify this firmware bug, check history, route evidence, and produce the first triage decision."

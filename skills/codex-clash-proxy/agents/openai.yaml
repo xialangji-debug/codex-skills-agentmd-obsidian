@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Clash Proxy"
+  short_description: "Codex downloads through Clash only"
+  default_prompt: "Use $codex-clash-proxy to download dependencies through Clash without changing the system proxy."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex CC Switch Mobile"
+  short_description: "Route Codex mobile desktop sessions through CC Switch sites or a local Responses API proxy."
+  default_prompt: "Help me configure Codex mobile remote control so both ends use the same ChatGPT account while desktop model requests keep going through CC Switch sites such as icodeeasy or another local Responses API proxy."
