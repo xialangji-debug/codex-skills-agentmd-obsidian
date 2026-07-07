@@ -22,6 +22,7 @@ Options:
   --file <path>                   Explicit file to upload. Can be repeated.
   --readme <path>                 User-provided readme.txt to upload.
   --include-readme                Include <upload-dir>/readme.txt if present.
+  --keep-device-ver               Keep yl_device_ver unchanged while using --release-time only as the remote folder.
   --remote-product-folder <name>  Product folder under 阿科奇-国内. Default: project-folder-map.md or heuristic.
   --resolve-only                  Resolve release names and product folder, then exit without login/upload.
   --create-missing-folder         Deprecated alias; timestamp folders are created automatically for real uploads.
@@ -114,6 +115,9 @@ function parseArgs(argv) {
         break;
       case "--include-readme":
         args.includeReadme = true;
+        break;
+      case "--keep-device-ver":
+        args.keepDeviceVer = true;
         break;
       default:
         fail(`Unknown option: ${item}`);
@@ -615,7 +619,7 @@ async function main() {
   const { deviceVer: currentDeviceVer, releaseTime: inferredReleaseTime } = extractDeviceVer(repo);
   const releaseTime = args.releaseTime || inferredReleaseTime;
   if (!/^\d{8}_\d{4}$/.test(releaseTime)) fail(`Invalid release time: ${releaseTime}`);
-  const deviceVer = deviceVerForReleaseTime(currentDeviceVer, releaseTime);
+  const deviceVer = args.keepDeviceVer ? currentDeviceVer : deviceVerForReleaseTime(currentDeviceVer, releaseTime);
 
   const branch = runGit(repo, ["branch", "--show-current"]) || "(unknown)";
   const commit = runGit(repo, ["rev-parse", "--short", "HEAD"]) || "(unknown)";
@@ -633,6 +637,7 @@ async function main() {
   console.log(`commit: ${commit}`);
   console.log(`yl_device_ver: ${deviceVer}`);
   console.log(`release_time: ${releaseTime}`);
+  if (args.keepDeviceVer) console.log("keep_device_ver: true; release_time is used only as the remote folder name.");
   console.log(`remote_product_folder: ${mapping.folder || "(heuristic)"} (${mapping.source})`);
   console.log((args.preflight || args.resolveOnly) ? "expected_remote_files:" : "local_files:");
   for (const file of localFiles) {

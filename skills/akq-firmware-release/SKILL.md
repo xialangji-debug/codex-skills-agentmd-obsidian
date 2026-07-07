@@ -122,6 +122,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex
 # Reuse an existing local package/checkpoint and verify/upload missing readme or identical remote files.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\akq-firmware-release\scripts\akq_release.ps1" -Repo . -ReleaseTime 20260702_1817 -TrustExistingPackage
 
+# Special fixed-version branches: keep yl.h/yl_device_ver unchanged, use ReleaseTime only for the remote folder.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\akq-firmware-release\scripts\akq_release.ps1" -Repo . -KeepYlVersion
+
 # Explicitly skip release readme generation/upload.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\akq-firmware-release\scripts\akq_release.ps1" -Repo . -ReleaseTime 20260702_1817 -NoReadme
 ```

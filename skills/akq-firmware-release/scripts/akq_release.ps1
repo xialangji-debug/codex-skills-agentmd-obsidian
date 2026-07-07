@@ -12,6 +12,7 @@ param(
   [switch]$ForceCleanBuild,
   [switch]$TrustExistingPackage,
   [switch]$NoReadme,
+  [switch]$KeepYlVersion,
   [switch]$AllowUntrackedSource,
   [switch]$DryRun,
   [switch]$ReplaceExisting,
@@ -382,10 +383,11 @@ if (-not $DeviceMatch.Success) {
 }
 $CurrentDeviceVer = $DeviceMatch.Groups[1].Value
 $ReleaseToken = "_" + $ReleaseTime + "_"
-$IntendedDeviceVer = [regex]::Replace($CurrentDeviceVer, '_(\d{8}_\d{4})_', $ReleaseToken, 1)
-if ($IntendedDeviceVer -eq $CurrentDeviceVer -and -not $CurrentDeviceVer.Contains($ReleaseToken)) {
+$RewrittenDeviceVer = [regex]::Replace($CurrentDeviceVer, '_(\d{8}_\d{4})_', $ReleaseToken, 1)
+if ($RewrittenDeviceVer -eq $CurrentDeviceVer -and -not $CurrentDeviceVer.Contains($ReleaseToken)) {
   throw "Could not replace timestamp in yl_device_ver: $CurrentDeviceVer"
 }
+$IntendedDeviceVer = if ($KeepYlVersion) { $CurrentDeviceVer } else { $RewrittenDeviceVer }
 
 $ProductDir = Join-Path $RepoPath "out\product\$Target"
 $UploadDir = Join-Path $ProductDir "release_upload\$ReleaseTime"
@@ -403,11 +405,17 @@ Write-Host "branch: $Branch"
 Write-Host "commit: $Commit"
 Write-Host "release_time: $ReleaseTime"
 Write-Host "yl_device_ver: $IntendedDeviceVer"
+if ($KeepYlVersion) {
+  Write-Host "keep_yl_version: true; release_time is used only for release folder and local upload directory."
+}
 Write-Host "target: $Target"
 Write-Host "build_env: PS_MODE=$PSMode TARGET_OS=$TargetOS CHIP_ID=$ChipId"
 Write-Host "upload_dir: $UploadDir"
 
 $UploadBaseArgs = @($UploadScript, "--repo", $RepoPath, "--release-time", $ReleaseTime)
+if ($KeepYlVersion) {
+  $UploadBaseArgs += "--keep-device-ver"
+}
 if (-not [string]::IsNullOrWhiteSpace($RemoteProductFolder)) {
   $UploadBaseArgs += @("--remote-product-folder", $RemoteProductFolder)
 }
@@ -430,6 +438,9 @@ if (-not $NoPreflight -and -not $StateSaysUploaded -and -not $TrustExistingPacka
 }
 
 $updateArgs = @($PrepareScript, "--repo", $RepoPath, "--release-time", $ReleaseTime, "--update-yl-only")
+if ($KeepYlVersion) {
+  $updateArgs += @("--no-update-yl", "--keep-device-ver")
+}
 if ($DryRun) {
   $updateArgs += "--dry-run"
 }
@@ -480,6 +491,9 @@ if ($packageStateOk -and -not $ForceCleanBuild) {
   }
 
   $packageArgs = @($PrepareScript, "--repo", $RepoPath, "--release-time", $ReleaseTime, "--product-dir", $ProductDir, "--overwrite")
+  if ($KeepYlVersion) {
+    $packageArgs += @("--no-update-yl", "--keep-device-ver")
+  }
   if (-not [string]::IsNullOrWhiteSpace($Readme)) {
     $ReadmePath = Resolve-ExistingOrFullPath $Readme
     $packageArgs += @("--readme", $ReadmePath)

@@ -115,6 +115,11 @@ def main():
     parser.add_argument("--readme", help="User-provided readme.txt to include. Omit to exclude readme from upload files.")
     parser.add_argument("--output-dir", help="Destination directory for renamed upload files")
     parser.add_argument("--no-update-yl", action="store_true", help="Do not update yl.h")
+    parser.add_argument(
+        "--keep-device-ver",
+        action="store_true",
+        help="Keep yl_device_ver unchanged for upload file names while still using --release-time for the output folder.",
+    )
     parser.add_argument("--update-yl-only", action="store_true", help="Update yl.h timestamp and exit before choosing build artifacts")
     parser.add_argument("--dry-run", action="store_true", help="Show planned changes without writing")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing destination files")
@@ -127,14 +132,17 @@ def main():
         raise SystemExit(f"Missing yl.h: {yl_h}")
 
     text, encoding = read_text_preserve_encoding(yl_h)
-    old_ver, new_ver, new_text = update_device_ver_timestamp(text, args.release_time)
+    old_ver, rewritten_ver, new_text = update_device_ver_timestamp(text, args.release_time)
+    new_ver = old_ver if args.keep_device_ver else rewritten_ver
 
     print(f"repo: {repo}")
     print(f"yl_h: {yl_h}")
     print(f"old yl_device_ver: {old_ver}")
     print(f"new yl_device_ver: {new_ver}")
+    if args.keep_device_ver:
+        print(f"keep_device_ver: true; release folder time remains {args.release_time}")
 
-    if not args.no_update_yl and old_ver != new_ver:
+    if not args.no_update_yl and not args.keep_device_ver and old_ver != new_ver:
         if args.dry_run:
             print(f"DRY-RUN update yl.h timestamp using encoding {encoding}")
         else:
