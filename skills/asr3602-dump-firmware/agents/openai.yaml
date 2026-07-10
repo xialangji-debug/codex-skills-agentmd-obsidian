@@ -1,0 +1,4 @@
+interface:
+  display_name: "ASR3602 Dump Firmware"
+  short_description: "临时删看门狗、构建 dump 固件并刷机"
+  default_prompt: "Use $asr3602-dump-firmware to build and flash a dump-enabled LT52 ASR3602 firmware."

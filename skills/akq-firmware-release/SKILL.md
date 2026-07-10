@@ -167,4 +167,18 @@ $env:NODE_PATH="$env:USERPROFILE\.cache\codex-runtimes\codex-primary-runtime\dep
 node "$env:USERPROFILE\.codex\skills\akq-firmware-release\scripts\fnos_upload_release.js" --repo . --release-time 20260703_2002 --include-readme --allow-existing-identical
 ```
 
-- For flashing a just-built package with the `aboot_download` MCP tools, first inspect the package, then list devices only if the port is unknown. When the previous successful device is still `ASR Modem Device (COM3)`, use COM3 directly with `auto_enable_usb=true`, `at_fallback=true`, `reboot_after=true`, `quit_after=true`, and `baudrate=115200`. Report the final MCP status such as `SUCCEEDED`; do not paste the full flashing log unless the user asks.
+- For flashing a just-built package, first inspect the package and use the non-source firmware zip under `release_upload/<YYYYMMDD_HHMM>/`.
+
+```powershell
+Get-ChildItem out\product\craneg_modem_watch\release_upload\<YYYYMMDD_HHMM>
+Get-PnpDevice -PresentOnly | ? { $_.InstanceId -match 'VID_2ECC|PID_3010' -or $_.FriendlyName -match 'ASR Modem|ASR DIAG|ASR Serial' }
+```
+
+- Prefer `aboot_download` MCP tools when available. Use the main `ASR Modem Device (COMxx)` port, with `auto_enable_usb=true`, `at_fallback=true`, `reboot_after=true`, `quit_after=true`, and `baudrate=115200`. Report the final MCP status such as `SUCCEEDED`; do not paste the full flashing log unless the user asks.
+- If MCP tools are unavailable, use the local aboot tools fallback. Known good path on this machine:
+
+```powershell
+C:\Users\84365\Desktop\aboot-tools-2023.08.27-win-x64\adownload.exe -p COMxx -a -f -s 115200 -r -q "<firmware>.zip"
+```
+
+Use the first OK `ASR Modem Device (COMxx)` port, not the bluetooth serial ports. A successful run ends with `status : "SUCCEEDED"` and the device should re-enumerate as `ASR Modem Device`, `ASR Modem Device 2`, and `ASR DIAG USB Device`. Example verified on 2026-07-08: `COM14` fell back to `ASR Serial Download Device (COM16)`, flashed `LT52_ZX_ASR3602_TW18_V1.2_RTOS_CN_20260708_1027_V1.1.0_Release.zip`, and returned `SUCCEEDED`.

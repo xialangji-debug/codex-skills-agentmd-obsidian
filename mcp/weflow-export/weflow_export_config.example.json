@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "weflow-export": {
+      "command": "node",
+      "args": [
+        "%USERPROFILE%\\.codex\\mcp\\weflow-export\\weflow_export_mcp_server.js"
+      ],
+      "env": {
+        "WEFLOW_USER_DATA": "C:\\Users\\<your-user>\\AppData\\Roaming\\weflow"
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 ---
 name: catstudio-log-extractor
-description: Extract and summarize ASR/CATStudio log packages for AI triage and evidence-pack generation. Use when Codex receives CATStudio `.zip`, extracted CATStudio log folders, `.icl` logs, LogViewer exports, live CATStudio logging requests, automatic current-log capture, or device reboot/log recapture requests. Handles Device0 DIAG/App-DIAG/GKI/DSP data such as MMI/LOG, memory, crash, system, network, SIM, LTE, WiFi, GPS/location, power, CPU, or protocol traces without using the CATStudio GUI. Use --fast-evidence for the first pass; expand to --evidence-pack when broad crash/network/memory evidence is needed.
+description: Extract and summarize ASR/CATStudio log packages for AI triage and evidence-pack generation. Use when Codex receives CATStudio `.zip`, extracted CATStudio log folders, `.icl` logs, LogViewer exports, live CATStudio logging requests, automatic current-log capture, YModem dump receive requests, or dump-log evidence requests. Handles Device0 DIAG/App-DIAG/GKI/DSP data such as MMI/LOG, memory, crash, system, network, SIM, LTE, WiFi, GPS/location, power, CPU, or protocol traces without using the CATStudio GUI. Use --fast-evidence for the first pass; expand to --evidence-pack when broad crash/network/memory evidence is needed.
 ---
 
 # CATStudio Log Extractor
@@ -17,22 +17,29 @@ Default output goes beside the input file. Use `--output-dir <dir>` for a separa
 
 ## Live CATStudio MCP
 
-When the user asks to grab the current device log, inspect live CATStudio state, list connected devices, or reboot the test device before/after a repro, prefer the local MCP server `catstudio_device` when available.
+When the user asks to grab the current device log, inspect live CATStudio state, capture dump logs, receive a YModem dump file, or package evidence after a repro, prefer the local MCP server `catstudio-capture` when available.
+
+Intent split:
+
+- Plain `抓日志`, `保存日志`, or `暂停日志`: use the log-only workflow. Pause/save CATStudio and copy `.icl/.ild`; do not call YModem dump tools.
+- Explicit `抓dump`, `接收dump`, or `YModemDump`: use the dump workflow. Dump files default to `C:\Users\84365\Desktop\工具\dump`.
 
 Configured server:
 
 ```text
-C:\Users\84365\.codex\mcp\catstudio-device\catstudio_device_mcp.py
+C:\Users\84365\plugins\catstudio-capture\scripts\catstudio_capture_mcp.py
 ```
 
 Main tools:
 
-- `catstudio_status`: locate CATStudio, current `Bin Logs`, latest `.icl/.ild`, and latest DebugLog directory.
-- `list_catstudio_logs`: list recent CATStudio binary logs.
-- `grab_latest_catstudio_log`: copy the latest `.icl/.ild` pair and run this skill's extractor to create `mmi.tsv`, `summary.tsv`, and `evidence.md`.
-- `export_catstudio_log`: export a specific `.icl` file.
-- `list_connected_devices`: inspect ADB and serial COM devices.
-- `reboot_device`: reboot through explicit `adb` or `serial_at`; it refuses unless `confirm=true`.
+- `catstudio_capture_status`: locate CATStudio, current `Bin Logs`, latest `.icl/.ild`, serial ports, and blocker processes.
+- `catstudio_list_logs`: list recent CATStudio binary log pairs.
+- `catstudio_grab_latest_log`: pause/save by default, then copy the latest `.icl/.ild` pair and optionally run this skill's extractor to create evidence files.
+- `catstudio_pause_and_save_log`: explicit plain-log workflow for `抓日志`; it pauses CATStudio, waits for the latest log to flush, and copies it.
+- `catstudio_ymodem_status`: inspect whether direct YModem dump receive is safe, including `CATStudio`, `adownload`, and `aboot` blockers. Use only on explicit dump requests.
+- `catstudio_receive_ymodem_dump`: receive one dump file over serial YModem into `C:\Users\84365\Desktop\工具\dump` by default. It refuses unless `confirm=true`; it does not close CATStudio unless `closeCatstudio=true`.
+
+Boundary: this MCP is evidence capture only. It must not modify firmware files, build packages, flash devices, or remove the watchdog config. Use `asr3602-dump-firmware` first only when the user explicitly needs a dump-capable firmware built/flashed.
 
 If the MCP tools are not visible in the current session, the configuration may have been added after Codex started. Use the script directly as a fallback, or restart/reload Codex to expose the MCP tools.
 

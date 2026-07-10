@@ -2,9 +2,37 @@
 "use strict";
 
 const fs = require("fs");
+const Module = require("module");
 const os = require("os");
 const path = require("path");
 const cp = require("child_process");
+
+function ensureBundledNodeModules() {
+  const bundledNodeRoot = path.resolve(path.dirname(process.execPath), "..");
+  const fallbackNodeModules = path.join(
+    os.homedir(),
+    ".cache",
+    "codex-runtimes",
+    "codex-primary-runtime",
+    "dependencies",
+    "node",
+    "node_modules",
+  );
+  const candidates = [
+    path.join(bundledNodeRoot, "node_modules"),
+    path.join(bundledNodeRoot, "node_modules", ".pnpm", "node_modules"),
+    fallbackNodeModules,
+    path.join(fallbackNodeModules, ".pnpm", "node_modules"),
+  ].filter((candidate) => fs.existsSync(candidate));
+  const existing = (process.env.NODE_PATH || "").split(path.delimiter).filter(Boolean);
+  const modulePaths = [...new Set([...existing, ...candidates])];
+  if (modulePaths.length) {
+    process.env.NODE_PATH = modulePaths.join(path.delimiter);
+    Module._initPaths();
+  }
+}
+
+ensureBundledNodeModules();
 
 const DEFAULT_SITE_URL = "http://zentao.hzyuelan.com/zentao";
 
@@ -25,13 +53,19 @@ function parseArgs(argv) {
     plan: "",
     resolution: "fixed",
     resolvedBuild: "",
-    assignTo: "self",
+    assignTo: "",
     comment: "",
     commentFile: "",
     output: "",
     siteUrl: DEFAULT_SITE_URL,
     headed: false,
+    buildCurrentBranch: false,
+    activateClosed: false,
+    activateComment: "开发误关闭，按流程重新激活后改为已解决，关闭留给测试。",
+    forceResolve: false,
+    expectStatus: "已解决",
     submit: false,
+    minimal: false,
   };
 
   for (let i = 2; i < argv.length; i++) {
@@ -52,7 +86,13 @@ function parseArgs(argv) {
     else if (a === "--output") args.output = next();
     else if (a === "--site-url") args.siteUrl = next().replace(/\/$/, "");
     else if (a === "--headed") args.headed = true;
+    else if (a === "--build-current-branch") args.buildCurrentBranch = true;
+    else if (a === "--activate-closed") args.activateClosed = true;
+    else if (a === "--activate-comment") args.activateComment = next();
+    else if (a === "--force-resolve") args.forceResolve = true;
+    else if (a === "--expect-status") args.expectStatus = next();
     else if (a === "--submit") args.submit = true;
+    else if (a === "--minimal") args.minimal = true;
     else if (a === "--dry-run") args.submit = false;
     else if (a === "--help" || a === "-h") {
       console.log(`Usage:
@@ -65,12 +105,23 @@ Defaults:
   --resolution fixed maps to 已解决 and may leave comment empty.
   --resolution external maps to 外部原因 and requires --comment/plan comment.
   --build trunk maps to 主干.
-  --assign-to self picks the first assignee option, usually the current user.
+  --build-current-branch uses the current git branch as the fixed build when none is set.
+  --activate-closed reopens 已关闭 bugs before resolving them; never clicks 关闭.
+  Assignee is preserved unless --assign-to is explicitly provided.
+  --minimal is an --ids-only shortcut for fixed, empty comment, and preserved assignee.
 `);
       process.exit(0);
     } else {
       throw new Error(`Unknown argument: ${a}`);
     }
+  }
+
+  if (args.minimal) {
+    if (args.plan) throw new Error("--minimal only supports --ids; use explicit fields in a resolve plan.");
+    args.resolution = "fixed";
+    args.assignTo = "";
+    args.comment = "";
+    args.commentFile = "";
   }
 
   return args;
@@ -123,7 +174,7 @@ function loadCredential() {
 }
 
 async function loginIfNeeded(page, siteUrl, credentials) {
-  await page.goto(`${siteUrl}/my.html`, { waitUntil: "domcontentloaded", timeout: 60000 });
+  await gotoWithRetry(page, `${siteUrl}/my.html`);
   const loginInput = page.locator('input[name="account"], input[name="username"], input#account').first();
   if (await loginInput.count()) {
     await loginInput.fill(credentials.username);
@@ -228,11 +279,17 @@ function loadPlan(args) {
   }));
 }
 
-function validateItems(items, defaults) {
+function resolveBuildAlias(value, ctx) {
+  const n = normalize(value);
+  if (["currentbranch", "current-branch", "branch", "当前分支", "当前版本"].includes(n)) return ctx.branch;
+  return value;
+}
+
+function validateItems(items, defaults, ctx) {
   for (const item of items) {
     item.id = `${item.id || ""}`.trim().replace(/^#/, "");
     item.resolution = normalizeResolution(item.resolution || defaults.resolution || "fixed");
-    item.resolvedBuild = `${item.resolvedBuild || defaults.resolvedBuild || ""}`.trim();
+    item.resolvedBuild = resolveBuildAlias(`${item.resolvedBuild || defaults.resolvedBuild || ""}`.trim(), ctx);
     item.assignTo = `${item.assignTo || defaults.assignTo || ""}`.trim();
     item.comment = `${item.comment || ""}`.trim();
 
@@ -243,9 +300,26 @@ function validateItems(items, defaults) {
     if (item.resolution !== "fixed" && item.resolution !== "external" && !item.comment) {
       throw new Error(`Bug #${item.id} uses ${item.resolution}; add a comment or use fixed.`);
     }
-    if (item.resolution === "fixed" && !item.resolvedBuild) item.resolvedBuild = "trunk";
-    if (!item.assignTo) item.assignTo = "self";
+    if (item.resolution === "fixed" && !item.resolvedBuild) {
+      item.resolvedBuild = defaults.buildCurrentBranch ? ctx.branch : "trunk";
+    }
   }
+}
+
+async function gotoWithRetry(page, url, attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts) break;
+      console.warn(`Navigation failed (${attempt}/${attempts}), retrying: ${url}`);
+      await page.waitForTimeout(750 * attempt);
+    }
+  }
+  throw lastError;
 }
 
 async function findFormFrame(page) {
@@ -260,9 +334,30 @@ async function findFormFrame(page) {
 }
 
 async function gotoResolveForm(page, siteUrl, bugId) {
-  await page.goto(`${siteUrl}/bug-resolve-${bugId}.html`, { waitUntil: "domcontentloaded", timeout: 60000 });
+  await gotoWithRetry(page, `${siteUrl}/bug-resolve-${bugId}.html`);
   await page.waitForTimeout(1000);
   return findFormFrame(page);
+}
+
+async function findGenericFormFrame(page, markerText) {
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    for (const frame of page.frames()) {
+      const found = await frame.evaluate((marker) => {
+        const text = document.body?.innerText || "";
+        return text.includes(marker) && !!document.querySelector("form");
+      }, markerText).catch(() => false);
+      if (found) return frame;
+    }
+    await page.waitForTimeout(300);
+  }
+  throw new Error(`${markerText} form not found.`);
+}
+
+async function gotoActivateForm(page, siteUrl, bugId) {
+  await gotoWithRetry(page, `${siteUrl}/bug-activate-${bugId}.html`);
+  await page.waitForTimeout(1000);
+  return findGenericFormFrame(page, "激活Bug");
 }
 
 async function readFormState(frame) {
@@ -349,22 +444,45 @@ async function fillComment(page, frame, comment) {
   if (!comment) return "";
   const editor = frame.locator('zen-editor[name="comment"]').first();
   if (await editor.count()) {
-    await editor.click({ timeout: 10000 });
-    await page.keyboard.press("Control+A").catch(() => {});
-    await page.keyboard.press("Delete").catch(() => {});
-    await page.keyboard.insertText(comment);
-    await page.waitForTimeout(200);
+    const editable = editor.locator('[contenteditable="true"], textarea').first();
+    if (await editable.count()) {
+      await editable.fill(comment);
+      await editable.evaluate((node) => node.blur()).catch(() => {});
+    } else {
+      await editor.evaluate((node, value) => {
+        node.value = value;
+        node.setAttribute("value", value);
+        node.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+        node.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+      }, comment);
+    }
   } else {
     const textarea = frame.locator('textarea[name="comment"], textarea').first();
     if (await textarea.count()) await textarea.fill(comment);
   }
 
-  return await frame.evaluate(() => {
+  await page.waitForTimeout(200);
+
+  const postedComment = await frame.evaluate(() => {
     const form = document.querySelector("form");
     if (!form) return "";
     const values = Array.from(new FormData(form).entries()).filter(([key]) => key === "comment");
     return `${values[0]?.[1] || ""}`;
   });
+  if (!postedComment.trim()) {
+    throw new Error("Comment field did not stick in the Zentao resolve form.");
+  }
+  return postedComment;
+}
+
+function pickBuildOption(items, requested) {
+  try {
+    return pickOption(items, requested || "trunk", "resolvedBuild");
+  } catch (error) {
+    if (["trunk", "主干"].includes(normalize(requested))) throw error;
+    const fallback = pickOption(items, "trunk", "resolvedBuild");
+    return { ...fallback, fallbackFrom: requested };
+  }
 }
 
 async function formDataSnapshot(frame) {
@@ -386,40 +504,141 @@ async function submitForm(page, frame) {
   await page.waitForTimeout(2500);
 }
 
-async function readBugStatus(page, siteUrl, bugId) {
-  await page.goto(`${siteUrl}/bug-view-${bugId}.html`, { waitUntil: "domcontentloaded", timeout: 60000 });
+async function readBugInfo(page, siteUrl, bugId) {
+  await gotoWithRetry(page, `${siteUrl}/bug-view-${bugId}.html`);
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
     for (const frame of page.frames()) {
-      const status = await frame.evaluate(() => {
+      const info = await frame.evaluate((id) => {
         const text = document.body?.innerText || "";
         const match = text.match(/Bug状态\s*\n\s*([^\n]+)/);
-        return match ? match[1].trim() : "";
-      }).catch(() => "");
-      if (status) return status;
+        const lines = text.split(/\n/).map((line) => line.trim()).filter(Boolean);
+        const idIndex = lines.indexOf(String(id));
+        return {
+          status: match ? match[1].trim() : "",
+          title: idIndex >= 0 ? (lines[idIndex + 1] || "") : "",
+        };
+      }, `${bugId}`).catch(() => ({ status: "", title: "" }));
+      if (info.status) return info;
     }
     await page.waitForTimeout(500);
   }
-  return "";
+  return { status: "", title: "" };
+}
+
+async function readBugStatus(page, siteUrl, bugId) {
+  return (await readBugInfo(page, siteUrl, bugId)).status;
+}
+
+async function activateBug(page, args, item) {
+  const frame = await gotoActivateForm(page, args.siteUrl, item.id);
+  const postedComment = await fillComment(page, frame, args.activateComment);
+  await submitForm(page, frame);
+  const status = await readBugStatus(page, args.siteUrl, item.id);
+  if (status !== "激活") {
+    throw new Error(`Bug #${item.id} activation failed; status is "${status}".`);
+  }
+  return { status, postedCommentLength: postedComment.length };
+}
+
+function formValue(formData, key) {
+  const hit = formData.find(([name]) => name === key);
+  return hit ? hit[1] : "";
 }
 
 async function processBug(page, args, item) {
+  const beforeInfo = await readBugInfo(page, args.siteUrl, item.id);
+  let activated = false;
+  let activationPlanned = false;
+  let activationCommentLength = 0;
+  let skipped = false;
+  let skipReason = "";
+
+  if (beforeInfo.status === "已关闭") {
+    if (!args.activateClosed) {
+      throw new Error(`Bug #${item.id} is 已关闭. Pass --activate-closed to reopen it before resolving; do not click 关闭 from development.`);
+    }
+    if (!args.submit) {
+      activationPlanned = true;
+      skipped = true;
+      skipReason = "dry-run: closed bug would be activated then resolved with --submit";
+      return {
+        id: item.id,
+        title: item.title || beforeInfo.title,
+        requestedResolution: item.resolution,
+        resolution: { value: item.resolution, label: item.resolution },
+        build: { value: item.resolvedBuild, label: item.resolvedBuild },
+        assignee: { value: item.assignTo, label: item.assignTo, preserved: !item.assignTo },
+        beforeStatus: beforeInfo.status,
+        activated,
+        activationPlanned,
+        activationCommentLength,
+        skipped,
+        skipReason,
+        commentEmpty: !item.comment,
+        postedCommentLength: 0,
+        submitted: false,
+        finalStatus: beforeInfo.status,
+        formData: [],
+      };
+    }
+    const activation = await activateBug(page, args, item);
+    activated = true;
+    activationCommentLength = activation.postedCommentLength;
+  }
+
+  if (beforeInfo.status === "已解决" && !args.forceResolve) {
+    skipped = true;
+    skipReason = "already-resolved";
+    return {
+      id: item.id,
+      title: item.title || beforeInfo.title,
+      requestedResolution: item.resolution,
+      resolution: { value: item.resolution, label: item.resolution },
+      build: { value: item.resolvedBuild, label: item.resolvedBuild },
+      assignee: { value: item.assignTo, label: item.assignTo, preserved: !item.assignTo },
+      beforeStatus: beforeInfo.status,
+      activated,
+      activationPlanned,
+      activationCommentLength,
+      skipped,
+      skipReason,
+      commentEmpty: !item.comment,
+      postedCommentLength: 0,
+      submitted: false,
+      finalStatus: beforeInfo.status,
+      formData: [],
+    };
+  }
+
   const frame = await gotoResolveForm(page, args.siteUrl, item.id);
   const state = await readFormState(frame);
 
   const resolution = pickOption(state.resolutionOptions, item.resolution, "resolution");
   const build = item.resolution === "fixed"
-    ? pickOption(state.buildOptions, item.resolvedBuild || "trunk", "resolvedBuild")
+    ? pickBuildOption(state.buildOptions, item.resolvedBuild || "trunk")
     : (item.resolvedBuild ? pickOption(state.buildOptions, item.resolvedBuild, "resolvedBuild") : { value: "", label: "" });
   const assignee = item.assignTo
     ? pickOption(state.assignOptions, item.assignTo, "assignedTo")
-    : { value: "", label: "" };
+    : {
+        value: state.values.assignedTo,
+        label: state.assignOptions.find((option) => option.value === state.values.assignedTo)?.text || state.values.assignedTo,
+        preserved: true,
+      };
 
   await setPickerValue(frame, "resolution", resolution.value);
   if (build.value) await setPickerValue(frame, "resolvedBuild", build.value);
   if (assignee.value) await setPickerValue(frame, "assignedTo", assignee.value);
   const postedComment = await fillComment(page, frame, item.comment);
   const formData = await formDataSnapshot(frame);
+  const submittedResolution = formValue(formData, "resolution");
+  const submittedBuild = formValue(formData, "resolvedBuild");
+  if (resolution.value && submittedResolution !== resolution.value) {
+    throw new Error(`Bug #${item.id} resolution field did not stick: expected ${resolution.value}, got ${submittedResolution}`);
+  }
+  if (item.resolution === "fixed" && build.value && submittedBuild !== build.value) {
+    throw new Error(`Bug #${item.id} resolvedBuild field did not stick: expected ${build.value}, got ${submittedBuild}`);
+  }
 
   let submitted = false;
   let finalStatus = "";
@@ -427,15 +646,24 @@ async function processBug(page, args, item) {
     await submitForm(page, frame);
     submitted = true;
     finalStatus = await readBugStatus(page, args.siteUrl, item.id);
+    if (item.resolution === "fixed" && args.expectStatus && finalStatus !== args.expectStatus) {
+      throw new Error(`Bug #${item.id} submit did not reach ${args.expectStatus}; final status is "${finalStatus}".`);
+    }
   }
 
   return {
     id: item.id,
-    title: item.title || state.title,
+    title: item.title || state.title || beforeInfo.title,
     requestedResolution: item.resolution,
     resolution,
     build,
     assignee,
+    beforeStatus: beforeInfo.status,
+    activated,
+    activationPlanned,
+    activationCommentLength,
+    skipped,
+    skipReason,
     commentEmpty: !item.comment,
     postedCommentLength: postedComment.length,
     submitted,
@@ -466,14 +694,18 @@ function markdownReport(ctx, args, results) {
   lines.push(`- Branch: ${ctx.branch}`);
   lines.push(`- Commit: ${ctx.commit}`);
   lines.push("");
-  lines.push("| ID | Title | Solution | Build | Assign To | Comment | Submitted | Final Status |");
-  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
+  lines.push("| ID | Title | Before | Solution | Build | Assign To | Activated | Comment | Submitted | Final Status |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const r of results) {
     const title = (r.title || "").replace(/\|/g, "/");
     const solution = `${r.resolution.label || r.resolution.value} (${r.resolution.value})`;
-    const build = r.build.value ? `${r.build.label || r.build.value} (${r.build.value})` : "-";
-    const assignee = r.assignee.value ? `${r.assignee.label || r.assignee.value} (${r.assignee.value})` : "-";
-    lines.push(`| ${r.id} | ${title} | ${solution} | ${build} | ${assignee} | ${r.commentEmpty ? "empty" : `${r.postedCommentLength} chars`} | ${r.submitted ? "yes" : "no"} | ${r.finalStatus || "-"} |`);
+    const fallback = r.build.fallbackFrom ? `, fallback from ${r.build.fallbackFrom}` : "";
+    const build = r.build.value ? `${r.build.label || r.build.value} (${r.build.value}${fallback})` : "-";
+    const assignee = r.assignee.preserved ? "preserved" : (r.assignee.value ? `${r.assignee.label || r.assignee.value} (${r.assignee.value})` : "-");
+    const activated = r.activated ? "yes" : (r.activationPlanned ? "planned" : "no");
+    const comment = r.commentEmpty ? "empty" : `${r.postedCommentLength} chars`;
+    const status = r.skipped ? `${r.finalStatus || "-"} (${r.skipReason})` : (r.finalStatus || "-");
+    lines.push(`| ${r.id} | ${title} | ${r.beforeStatus || "-"} | ${solution} | ${build} | ${assignee} | ${activated} | ${comment} | ${r.submitted ? "yes" : "no"} | ${status} |`);
   }
   lines.push("");
   return lines.join("\n");
@@ -483,7 +715,7 @@ async function main() {
   const args = parseArgs(process.argv);
   const ctx = repoContext(args.repo);
   const items = loadPlan(args);
-  validateItems(items, args);
+  validateItems(items, args, ctx);
   const outDir = ensureOutputDir(args, ctx, items);
 
   const { chromium } = require("playwright");
@@ -526,7 +758,16 @@ async function main() {
   console.log(markdownReport(ctx, args, results));
 }
 
-main().catch((error) => {
-  console.error(`[zentao-bug-resolver] ${error.message}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(`[zentao-bug-resolver] ${error.message}`);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  parseArgs,
+  parseJsonPlan,
+  parseMarkdownPlan,
+  pickBuildOption,
+};

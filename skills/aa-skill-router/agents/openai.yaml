@@ -1,0 +1,6 @@
+interface:
+  display_name: "技能路由器"
+  short_description: "把抓bug、协议、日志、收工等请求路由到正确技能"
+  default_prompt: "Use $aa-skill-router to route the user request to the right local Codex skill, project context, or skill index before acting."
+policy:
+  allow_implicit_invocation: true

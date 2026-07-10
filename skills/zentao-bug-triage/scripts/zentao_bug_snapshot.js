@@ -13,17 +13,25 @@ function parseArgs(argv) {
   const args = {
     repo: process.cwd(),
     assigned: false,
+    assignedTo: "",
+    assignedScanLimit: 500,
     currentProject: true,
     limit: 80,
-    detailLimit: 20,
-    downloadMode: "auto",
+    detailLimit: -1,
+    detailConcurrency: 4,
+    detailRetries: 2,
+    detailTimeoutMs: 60000,
+    downloadMode: "all",
     headed: false,
     projectName: "",
     projectKey: "",
     projectId: "",
+    productId: "",
     bugStatus: "all",
     ids: [],
     output: "",
+    expectRepoName: "",
+    expectBranch: "",
     writeObsidian: false,
     workMd: true,
     cleanup: "",
@@ -36,19 +44,34 @@ function parseArgs(argv) {
     };
     if (a === "--repo") args.repo = next();
     else if (a === "--assigned") args.assigned = true;
+    else if (a === "--assigned-to") args.assignedTo = next();
+    else if (a === "--mine") args.assignedTo = "me";
+    else if (a === "--current-mine-active") {
+      args.currentProject = true;
+      args.assignedTo = "me";
+      args.bugStatus = "active";
+    }
+    else if (a === "--assigned-scan-limit") args.assignedScanLimit = Number(next());
+    else if (a === "--active-only") args.bugStatus = "active";
     else if (a === "--current-project") args.currentProject = true;
     else if (a === "--no-current-project") args.currentProject = false;
     else if (a === "--limit") args.limit = Number(next());
     else if (a === "--detail-limit") args.detailLimit = Number(next());
+    else if (a === "--detail-concurrency") args.detailConcurrency = Number(next());
+    else if (a === "--detail-retries") args.detailRetries = Number(next());
+    else if (a === "--detail-timeout-ms") args.detailTimeoutMs = Number(next());
     else if (a === "--download-attachments") args.downloadMode = "all";
     else if (a === "--no-download-attachments") args.downloadMode = "none";
     else if (a === "--headed") args.headed = true;
     else if (a === "--project-name") args.projectName = next();
     else if (a === "--project-key") args.projectKey = next();
     else if (a === "--project-id") args.projectId = next();
+    else if (a === "--product-id") args.productId = next();
     else if (a === "--bug-status") args.bugStatus = next();
     else if (a === "--ids") args.ids = next().split(/[,\s]+/).filter(Boolean);
     else if (a === "--output") args.output = next();
+    else if (a === "--expect-repo-name") args.expectRepoName = next();
+    else if (a === "--expect-branch") args.expectBranch = next();
     else if (a === "--write-obsidian") args.writeObsidian = true;
     else if (a === "--write-work-md") args.workMd = true;
     else if (a === "--no-work-md") args.workMd = false;
@@ -56,18 +79,31 @@ function parseArgs(argv) {
     else if (a === "--help" || a === "-h") {
       console.log(`Usage:
   node zentao_bug_snapshot.js --repo . --limit 80
-  node zentao_bug_snapshot.js --repo . --limit 80 --detail-limit 20
+  node zentao_bug_snapshot.js --repo . --limit 80 --detail-concurrency 4
+  node zentao_bug_snapshot.js --repo . --limit 80 --detail-limit 20 --detail-concurrency 4
+  node zentao_bug_snapshot.js --repo . --limit 80 --detail-retries 2 --detail-timeout-ms 60000
+  node zentao_bug_snapshot.js --repo . --current-mine-active --limit 80
   node zentao_bug_snapshot.js --repo . --assigned --limit 80 [--download-attachments]
+  node zentao_bug_snapshot.js --repo . --assigned-to me --bug-status active --limit 80
   node zentao_bug_snapshot.js --repo . --project-name "TW18_阿科奇_LT52_乐智" --limit 80
   node zentao_bug_snapshot.js --repo . --project-id 134 --limit 80
+  node zentao_bug_snapshot.js --repo . --product-id 42 --project-name "TW18_阿科奇_LT52_APP" --limit 80
   node zentao_bug_snapshot.js --repo . --bug-status unresolved --detail-limit 0
   node zentao_bug_snapshot.js --repo . --ids 2947,2906,2894 --download-attachments
+  node zentao_bug_snapshot.js --repo . --expect-repo-name lt52_XCX_GB --expect-branch TW18_LT52_3602_小程序协议腕表20251218 --current-mine-active
   node zentao_bug_snapshot.js --cleanup "C:\\Users\\...\\.codex\\zentao-bug-triage\\snapshots\\<snapshot>"
 
 Defaults:
   With only --repo, the script reads references/project-map.md, resolves the current
   branch/yl_device_ver to a Zentao project, and fetches that project. If no exact
   project mapping is found it falls back to --assigned.
+  --expect-repo-name and --expect-branch are preflight guards. When provided, any
+  mismatch aborts before opening Zentao, which prevents fetching bugs from the
+  wrong worktree or branch.
+  By default every fetched list row opens its detail page and downloads all
+  attachments. Detail pages are fetched with four parallel workers. Use
+  --detail-limit 0 or --no-download-attachments only for an explicitly requested
+  fast list.
   Each snapshot writes triage.md, work-items.md, and ignored-items.md unless
   --no-work-md is passed. work-items.md contains bugs Codex should inspect/fix.
   ignored-items.md contains platform/low-level/log-needed/unclear issues to skip.
@@ -90,17 +126,20 @@ function run(cmd, cwd) {
 }
 
 function repoContext(repo) {
-  let branch = run(["git", "branch", "--show-current"], repo);
+  const repoInput = path.resolve(repo);
+  const gitRoot = run(["git", "rev-parse", "--show-toplevel"], repoInput);
+  const repoRoot = path.resolve(gitRoot || repoInput);
+  let branch = run(["git", "branch", "--show-current"], repoRoot);
   if (!branch) {
-    branch = run(["git", "name-rev", "--name-only", "HEAD"], repo)
+    branch = run(["git", "name-rev", "--name-only", "HEAD"], repoRoot)
       .replace(/^remotes\/origin\//, "")
       .replace(/~\d+$/, "");
   }
   if (!branch || branch === "undefined" || branch === "HEAD") branch = "unknown";
-  const commit = run(["git", "rev-parse", "--short", "HEAD"], repo) || "unknown";
-  const dirty = run(["git", "status", "--short"], repo);
+  const commit = run(["git", "rev-parse", "--short", "HEAD"], repoRoot) || "unknown";
+  const dirty = run(["git", "status", "--short"], repoRoot);
   let deviceVer = "";
-  const ylPath = path.join(repo, "gui", "lv_watch", "lv_apps", "yl", "yl.h");
+  const ylPath = path.join(repoRoot, "gui", "lv_watch", "lv_apps", "yl", "yl.h");
   if (fs.existsSync(ylPath)) {
     const text = fs.readFileSync(ylPath, "utf8");
     const m = text.match(/yl_device_ver\s+"([^"]+)"/);
@@ -118,11 +157,26 @@ function repoContext(repo) {
     if (hwMatch) hwVer = hwMatch[1];
     if (softMatch) softVer = softMatch[1];
   }
-  return { repo: path.resolve(repo), branch, commit, dirty, deviceVer, deviceName, hwVer, softVer };
+  return { repo: repoRoot, repoInput, repoName: path.basename(repoRoot), branch, commit, dirty, deviceVer, deviceName, hwVer, softVer };
 }
 
 function normalizeText(value) {
   return (value || "").toLowerCase().replace(/\s+/g, "").trim();
+}
+
+function assertExpectedContext(ctx, args) {
+  const mismatches = [];
+  if (args.expectRepoName && normalizeText(ctx.repoName) !== normalizeText(args.expectRepoName)) {
+    mismatches.push(`repo name expected "${args.expectRepoName}", actual "${ctx.repoName}" (${ctx.repo})`);
+  }
+  if (args.expectBranch && normalizeText(ctx.branch) !== normalizeText(args.expectBranch)) {
+    mismatches.push(`branch expected "${args.expectBranch}", actual "${ctx.branch}"`);
+  }
+  if (!mismatches.length) return;
+  throw new Error([
+    "Preflight context mismatch. Refusing to fetch Zentao bugs from the wrong worktree/branch.",
+    ...mismatches.map((item) => `- ${item}`),
+  ].join("\n"));
 }
 
 function splitListValue(value) {
@@ -151,6 +205,7 @@ function parseProjectMap(text) {
         ylDeviceVerContains: [],
         zentaoNames: [],
         projectId: "",
+        productId: "",
         candidate: "",
         status: "",
         verified: "",
@@ -188,9 +243,11 @@ function parseProjectMap(text) {
       continue;
     }
 
-    const scalar = trimmed.match(/^(candidate|status|verified|project_id|zentao_project_id):\s*(.+)$/);
+    const scalar = trimmed.match(/^(candidate|status|verified|project_id|zentao_project_id|product_id|zentao_product_id):\s*(.+)$/);
     if (scalar) {
-      const key = scalar[1] === "project_id" || scalar[1] === "zentao_project_id" ? "projectId" : scalar[1];
+      const key = scalar[1] === "project_id" || scalar[1] === "zentao_project_id"
+        ? "projectId"
+        : (scalar[1] === "product_id" || scalar[1] === "zentao_product_id" ? "productId" : scalar[1]);
       current[key] = scalar[2].replace(/^["']|["']$/g, "");
     }
   }
@@ -233,6 +290,7 @@ function resolveCurrentProject(ctx) {
       mode: "project",
       projectName: exact.zentaoNames[0],
       projectId: exact.projectId || "",
+      productId: exact.productId || "",
       reason: "exact branch/version mapping",
       mapping: exact,
     };
@@ -245,6 +303,7 @@ function resolveCurrentProject(ctx) {
       mode: "project",
       projectName: uniqueNames[0],
       projectId: generic[0]?.projectId || "",
+      productId: generic[0]?.productId || "",
       reason: "single generic token mapping",
       mapping: generic[0],
     };
@@ -532,6 +591,14 @@ async function resolveProjectBugUrl(page, projectId, bugStatus) {
   return baseUrl;
 }
 
+function productBugUrl(productId, bugStatus) {
+  if (!productId) return "";
+  const status = normalizeText(bugStatus || "all");
+  if (status === "closed") return `${SITE_URL}/bug-browse-${productId}-closed-.html`;
+  if (status === "resolved") return `${SITE_URL}/bug-browse-${productId}-resolved-.html`;
+  return `${SITE_URL}/bug-browse-${productId}-all-.html`;
+}
+
 function classify(bug) {
   const issueText = `${bug.title}\n${bug.steps || ""}`.toLowerCase();
   const text = `${issueText}\n${bug.product || ""}`.toLowerCase();
@@ -727,6 +794,20 @@ function rowMatchesFilter(row, args) {
     if (keys.length && !keys.every((key) => haystack.includes(key))) return false;
   }
   return true;
+}
+
+function isMineAssignedFilter(args) {
+  const assignedTo = normalizeText(args.assignedTo || "");
+  return ["me", "mine", "self", "current", "我", "自己", "当前账号"].includes(assignedTo);
+}
+
+function rowMatchesAssignedTo(row, args) {
+  if (!args.assignedTo || isMineAssignedFilter(args)) return true;
+  const assignedTo = normalizeText(row.assignedTo || "");
+  if (!assignedTo) return false;
+  const targets = splitListValue(args.assignedTo).map(normalizeText).filter(Boolean);
+  if (!targets.length) return true;
+  return targets.some((target) => assignedTo === target || assignedTo.includes(target) || target.includes(assignedTo));
 }
 
 function projectNameMatches(value, projectName) {
@@ -946,8 +1027,40 @@ function attachmentFileName(link, index, response) {
   return name;
 }
 
+function compactError(error) {
+  return `${error?.message || error || "unknown error"}`.replace(/\s+/g, " ").trim().slice(0, 300);
+}
+
+function detailAttemptCount(args) {
+  const retries = Number.isFinite(args.detailRetries) ? Math.max(0, args.detailRetries) : 2;
+  return retries + 1;
+}
+
+function detailTimeoutMs(args) {
+  return Number.isFinite(args.detailTimeoutMs) && args.detailTimeoutMs > 0 ? args.detailTimeoutMs : 60000;
+}
+
+async function gotoBugDetailWithRetry(page, row, args) {
+  const attempts = detailAttemptCount(args);
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const startedAt = Date.now();
+    try {
+      await page.goto(row.href, { waitUntil: "domcontentloaded", timeout: detailTimeoutMs(args) });
+      return { attempt, elapsedMs: Date.now() - startedAt };
+    } catch (error) {
+      lastError = error;
+      await page.evaluate(() => window.stop()).catch(() => {});
+      if (attempt >= attempts) break;
+      console.warn(`[zentao-bug-triage] Detail page retry ${attempt}/${attempts} for bug #${row.id}: ${compactError(error)}`);
+      await page.waitForTimeout(Math.min(5000, 1200 * attempt));
+    }
+  }
+  throw lastError;
+}
+
 async function extractBugDetail(page, row, attachmentDir, args) {
-  await page.goto(row.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+  const detailNav = await gotoBugDetailWithRetry(page, row, args);
   await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(1000);
   const frame = await waitForContentFrame(page, new RegExp(`重现步骤|Bug类型|严重程度|Bug的一生|${row.id}`), 20000);
@@ -1008,6 +1121,8 @@ async function extractBugDetail(page, row, attachmentDir, args) {
     reactivated: Boolean(lastActivation),
     attachmentLinks,
     attachments: [],
+    detailFetchAttempts: detailNav.attempt,
+    detailFetchMs: detailNav.elapsedMs,
   };
   bug = { ...bug, ...classify(bug) };
 
@@ -1030,6 +1145,15 @@ async function extractBugDetail(page, row, attachmentDir, args) {
   bug.attachments = attachments;
   bug.detailFetched = true;
   return finalizeBug(bug);
+}
+
+function bugFromDetailError(row, args, error) {
+  const bug = bugFromRow(row, args);
+  bug.detailFetchError = compactError(error);
+  bug.detailFetchAttempts = detailAttemptCount(args);
+  bug.advice = `${bug.advice || ""}${bug.advice ? "；" : ""}详情页抓取失败，本轮保留列表摘要，修复前需用 --ids 重试深抓或手动确认详情`;
+  bug.handlingReason = `${bug.handlingReason || ""}${bug.handlingReason ? "；" : ""}详情页抓取失败：${bug.detailFetchError}`;
+  return bug;
 }
 
 function bugFromRow(row, args) {
@@ -1075,14 +1199,18 @@ function markdownReport(ctx, bugs) {
   lines.push(`# Zentao Bug Snapshot`);
   lines.push("");
   lines.push(`- 时间：${new Date().toLocaleString("zh-CN", { hour12: false })}`);
+  if (ctx.repoName) lines.push(`- Worktree：${ctx.repoName}`);
   lines.push(`- Repo：${ctx.repo}`);
   lines.push(`- 分支：${ctx.branch}`);
   lines.push(`- 提交：${ctx.commit}`);
   lines.push(`- yl_device_ver：${ctx.deviceVer || "未找到"}`);
   if (ctx.deviceName) lines.push(`- yl_device_name：${ctx.deviceName}`);
   if (ctx.projectName) lines.push(`- Zentao项目：${ctx.projectName}`);
+  if (ctx.productId) lines.push(`- Zentao产品ID：${ctx.productId}`);
   if (ctx.projectId) lines.push(`- Zentao项目ID：${ctx.projectId}`);
   if (ctx.bugStatus) lines.push(`- Bug状态筛选：${ctx.bugStatus}`);
+  if (ctx.assignedToFilter) lines.push(`- 指派筛选：${ctx.assignedToFilter === "me" ? "当前账号" : ctx.assignedToFilter}`);
+  if (typeof ctx.assignedScanCount === "number") lines.push(`- 指派给我候选：${ctx.assignedScanCount}`);
   if (ctx.fetchMode) lines.push(`- 抓取模式：${ctx.fetchMode}`);
   if (ctx.projectResolveReason) lines.push(`- 项目匹配：${ctx.projectResolveReason}`);
   lines.push(`- dirty：${ctx.dirty ? "是" : "否"}`);
@@ -1094,7 +1222,7 @@ function markdownReport(ctx, bugs) {
     const currentNote = b.lastActivation?.note || b.steps || "";
     const stepsSummary = currentNote.replace(/\s+/g, " ").replace(/\|/g, "/").slice(0, 120);
     const dates = [b.openedDate, b.editedDate, b.resolvedDate].map((x) => x || "-").join("/");
-    const detailText = b.detailFetched ? "已打开" : "列表";
+    const detailText = b.detailFetched ? "已打开" : (b.detailFetchError ? `失败:${b.detailFetchError}` : "列表");
     const activationText = b.reactivated ? `${b.activationCount || 1}次/${b.lastActivation?.date || ""}` : "-";
     const handling = `${b.handlingLabel || ""}${b.handlingAction ? `(${b.handlingAction})` : ""}`;
     const advice = `${b.advice || ""}${b.handlingReason ? `；${b.handlingReason}` : ""}`.replace(/\|/g, "/");
@@ -1148,13 +1276,21 @@ function chatSummaryReport(ctx, bugs, snapshotDir) {
   const lines = [];
   const workCount = bugs.filter((bug) => bug.handlingBucket === "work").length;
   const ignoredCount = bugs.length - workCount;
+  const detailFailedCount = bugs.filter((bug) => bug.detailFetchError).length;
   lines.push(`# 当前分支 Bug 简表`);
   lines.push("");
+  if (ctx.repoName) lines.push(`- Worktree：${ctx.repoName}`);
+  lines.push(`- Repo：${ctx.repo}`);
   lines.push(`- 分支：${ctx.branch}`);
   lines.push(`- 提交：${ctx.commit}`);
   if (ctx.projectName) lines.push(`- 禅道项目：${ctx.projectName}`);
+  if (ctx.productId) lines.push(`- 禅道产品ID：${ctx.productId}`);
   if (ctx.fetchMode) lines.push(`- 抓取模式：${ctx.fetchMode}`);
+  if (ctx.bugStatus) lines.push(`- Bug状态筛选：${ctx.bugStatus}`);
+  if (ctx.assignedToFilter) lines.push(`- 指派筛选：${ctx.assignedToFilter === "me" ? "当前账号" : ctx.assignedToFilter}`);
+  if (typeof ctx.assignedScanCount === "number") lines.push(`- 指派给我候选：${ctx.assignedScanCount} 个`);
   lines.push(`- 数量：共 ${bugs.length} 个，候选/可修 ${workCount} 个，先不动 ${ignoredCount} 个`);
+  if (detailFailedCount) lines.push(`- 详情失败：${detailFailedCount} 个，已保留列表摘要；修复前需用 --ids 重试深抓`);
   lines.push(`- 快照：${snapshotDir}`);
   lines.push("");
   lines.push("| ID | 标题 | 类型 | 处理建议 | 附件 | 我能否先修 |");
@@ -1202,10 +1338,12 @@ function workItemsReport(ctx, bugs, snapshotDir) {
   lines.push(`- 清理：全部修完后运行 \`node "${__filename}" --cleanup "${snapshotDir}"\`，只会删除 work/ignored 临时单和 attachments/。`);
   lines.push(`- 生成时间：${new Date().toLocaleString("zh-CN", { hour12: false })}`);
   lines.push(`- 快照目录：${snapshotDir}`);
+  if (ctx.repoName) lines.push(`- Worktree：${ctx.repoName}`);
   lines.push(`- Repo：${ctx.repo}`);
   lines.push(`- 分支：${ctx.branch}`);
   lines.push(`- 提交：${ctx.commit}`);
   if (ctx.projectName) lines.push(`- Zentao项目：${ctx.projectName}`);
+  if (ctx.productId) lines.push(`- Zentao产品ID：${ctx.productId}`);
   if (ctx.projectId) lines.push(`- Zentao项目ID：${ctx.projectId}`);
   if (ctx.fetchMode) lines.push(`- 抓取模式：${ctx.fetchMode}`);
   lines.push(`- 工作项数量：${workItems.length}`);
@@ -1225,6 +1363,7 @@ function workItemsReport(ctx, bugs, snapshotDir) {
     lines.push(`- 类型：${oneLine(bug.bugType)}`);
     lines.push(`- 状态：${oneLine(bug.status)}`);
     lines.push(`- 详情状态：${bug.detailFetched ? "已打开" : "列表，修复前需深抓详情"}`);
+    if (bug.detailFetchError) lines.push(`- 详情失败原因：${oneLine(bug.detailFetchError)}`);
     lines.push(`- 严重/优先：${oneLine(bug.severity)} / ${oneLine(bug.priority)}`);
     lines.push(`- 创建人/指派给：${oneLine(bug.openedBy)} / ${oneLine(bug.assignedTo)}`);
     lines.push(`- 创建/指派/修改/解决/关闭：${oneLine(bug.openedDate)} / ${oneLine(bug.assignedDate)} / ${oneLine(bug.editedDate)} / ${oneLine(bug.resolvedDate)} / ${oneLine(bug.closedDate)}`);
@@ -1318,10 +1457,12 @@ function ignoredItemsReport(ctx, bugs, snapshotDir) {
   lines.push(`- 清理：全部修完后运行 \`node "${__filename}" --cleanup "${snapshotDir}"\`，只会删除 work/ignored 临时单和 attachments/。`);
   lines.push(`- 生成时间：${new Date().toLocaleString("zh-CN", { hour12: false })}`);
   lines.push(`- 快照目录：${snapshotDir}`);
+  if (ctx.repoName) lines.push(`- Worktree：${ctx.repoName}`);
   lines.push(`- Repo：${ctx.repo}`);
   lines.push(`- 分支：${ctx.branch}`);
   lines.push(`- 提交：${ctx.commit}`);
   if (ctx.projectName) lines.push(`- Zentao项目：${ctx.projectName}`);
+  if (ctx.productId) lines.push(`- Zentao产品ID：${ctx.productId}`);
   if (ctx.projectId) lines.push(`- Zentao项目ID：${ctx.projectId}`);
   if (ctx.fetchMode) lines.push(`- 抓取模式：${ctx.fetchMode}`);
   lines.push(`- 忽略/等待数量：${ignoredItems.length}`);
@@ -1344,6 +1485,7 @@ function ignoredItemsReport(ctx, bugs, snapshotDir) {
     lines.push(`- 产品/项目：${oneLine(bug.product)}`);
     lines.push(`- 状态：${oneLine(bug.status)}`);
     lines.push(`- 详情状态：${bug.detailFetched ? "已打开" : "列表"}`);
+    if (bug.detailFetchError) lines.push(`- 详情失败原因：${oneLine(bug.detailFetchError)}`);
     lines.push(`- 激活次数：${bug.activationCount || 0}`);
     if (bug.reactivated) {
       lines.push(`- 最后激活：${oneLine(bug.lastActivation?.date)} / ${oneLine(bug.lastActivation?.actor)} / ${oneLine(bug.lastActivation?.summary)}`);
@@ -1426,10 +1568,12 @@ async function collectRowsFromStart(page, startUrl, args, options = {}) {
   }
 
   const applyProjectFilter = options.applyProjectFilter !== false;
+  const assignedIdSet = options.assignedIdSet instanceof Set ? options.assignedIdSet : null;
   while (rows.length < args.limit) {
     const pageRows = (await extractBugRows(page))
-      .filter((row) => applyProjectFilter ? (args.projectId ? true : rowMatchesFilter(row, args)) : true)
-      .filter((row) => rowMatchesBugStatus(row, args));
+      .filter((row) => applyProjectFilter ? ((args.projectId || args.productId) ? true : rowMatchesFilter(row, args)) : true)
+      .filter((row) => rowMatchesBugStatus(row, args))
+      .filter((row) => assignedIdSet ? assignedIdSet.has(`${row.id}`) : rowMatchesAssignedTo(row, args));
     for (const r of pageRows) {
       if (!rows.find((x) => x.id === r.id)) rows.push(r);
       if (rows.length >= args.limit) break;
@@ -1450,16 +1594,50 @@ function assignedFallbackRows(rows, projectName, limit, detailLimit) {
 }
 
 async function extractBugsFromRows(page, rows, args, attachmentRoot, detailLimit) {
-  const bugs = [];
-  const maxDetail = args.ids.length ? args.limit : Math.max(0, Math.min(detailLimit, args.limit));
-  for (const [index, row] of rows.slice(0, args.limit).entries()) {
-    const bugAttachmentDir = path.join(attachmentRoot, `bug-${row.id}`);
-    if (index < maxDetail) {
-      bugs.push(await extractBugDetail(page, row, bugAttachmentDir, args));
-    } else {
-      bugs.push(bugFromRow(row, args));
-    }
+  const selectedRows = rows.slice(0, args.limit);
+  const requestedDetailLimit = Number(args.detailLimit);
+  const maxDetail = args.ids.length || !Number.isFinite(requestedDetailLimit) || requestedDetailLimit < 0
+    ? selectedRows.length
+    : Math.max(0, Math.min(Math.floor(requestedDetailLimit), selectedRows.length));
+  const bugs = new Array(selectedRows.length);
+
+  for (let index = maxDetail; index < selectedRows.length; index++) {
+    bugs[index] = bugFromRow(selectedRows[index], args);
   }
+  if (maxDetail === 0) return bugs;
+
+  const requestedConcurrency = Number(args.detailConcurrency);
+  const workerCount = Math.max(1, Math.min(
+    Number.isFinite(requestedConcurrency) ? Math.floor(requestedConcurrency) : 1,
+    maxDetail,
+    8,
+  ));
+  console.log(`Deep fetching ${maxDetail} bug details with ${workerCount} parallel worker(s).`);
+
+  let nextIndex = 0;
+  const context = page.context();
+  const worker = async () => {
+    const workerPage = await context.newPage();
+    try {
+      while (true) {
+        const index = nextIndex++;
+        if (index >= maxDetail) break;
+
+        const row = selectedRows[index];
+        const bugAttachmentDir = path.join(attachmentRoot, `bug-${row.id}`);
+        try {
+          bugs[index] = await extractBugDetail(workerPage, row, bugAttachmentDir, args);
+        } catch (error) {
+          console.warn(`[zentao-bug-triage] Detail fetch failed for bug #${row.id}; using list row: ${compactError(error)}`);
+          bugs[index] = bugFromDetailError(row, args, error);
+        }
+      }
+    } finally {
+      await workerPage.close();
+    }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
   return bugs;
 }
 
@@ -1504,17 +1682,23 @@ async function main() {
     return;
   }
   const ctx = repoContext(args.repo);
-  const projectResolution = (!args.assigned && !args.projectName && !args.projectKey && !args.ids.length && args.currentProject)
+  assertExpectedContext(ctx, args);
+  if (args.expectRepoName) ctx.expectedRepoName = args.expectRepoName;
+  if (args.expectBranch) ctx.expectedBranch = args.expectBranch;
+  const hasExplicitProjectTarget = args.projectName || args.projectKey || args.projectId || args.productId;
+  const projectResolution = (!args.assigned && !hasExplicitProjectTarget && !args.ids.length && args.currentProject)
     ? resolveCurrentProject(ctx)
     : { mode: "" };
   if (projectResolution.mode === "project") {
     args.projectName = projectResolution.projectName;
+    if (projectResolution.productId) args.productId = projectResolution.productId;
     if (projectResolution.projectId) args.projectId = projectResolution.projectId;
-    ctx.fetchMode = "current-project";
+    ctx.fetchMode = args.projectId ? "current-project" : (args.productId ? "current-product" : "current-project");
     ctx.projectName = projectResolution.projectName;
+    if (projectResolution.productId) ctx.productId = projectResolution.productId;
     if (projectResolution.projectId) ctx.projectId = projectResolution.projectId;
     ctx.projectResolveReason = projectResolution.reason;
-  } else if (!args.assigned && !args.projectName && !args.projectKey && !args.ids.length) {
+  } else if (!args.assigned && !hasExplicitProjectTarget && !args.ids.length) {
     args.assigned = true;
     ctx.fetchMode = "assigned-fallback";
     ctx.projectResolveReason = projectResolution.reason || "no explicit fetch mode";
@@ -1523,10 +1707,23 @@ async function main() {
   } else if (args.assigned) {
     ctx.fetchMode = "assigned";
   } else {
-    ctx.fetchMode = args.projectId ? "project-id" : (args.projectName ? "project-name" : "project-key");
+    ctx.fetchMode = args.projectId ? "project-id" : (args.productId ? "product-id" : (args.projectName ? "project-name" : "project-key"));
     ctx.projectName = args.projectName || args.projectKey || args.projectId;
+    if (args.projectId) ctx.projectId = args.projectId;
+    if (args.productId) ctx.productId = args.productId;
   }
   ctx.bugStatus = args.bugStatus;
+  if (args.assignedTo) ctx.assignedToFilter = isMineAssignedFilter(args) ? "me" : args.assignedTo;
+
+  console.log("Preflight context:");
+  console.log(`  Worktree: ${ctx.repoName}`);
+  console.log(`  Repo: ${ctx.repo}`);
+  console.log(`  Branch: ${ctx.branch}`);
+  console.log(`  Commit: ${ctx.commit}`);
+  if (ctx.projectName) console.log(`  Zentao project: ${ctx.projectName}`);
+  if (ctx.projectId) console.log(`  Zentao project ID: ${ctx.projectId}`);
+  if (ctx.productId) console.log(`  Zentao product ID: ${ctx.productId}`);
+  if (ctx.projectResolveReason) console.log(`  Project mapping: ${ctx.projectResolveReason}`);
 
   const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
   const outRoot = args.output || path.join(os.homedir(), ".codex", "zentao-bug-triage", "snapshots", `${stamp}_${slug(ctx.branch)}`);
@@ -1550,10 +1747,11 @@ async function main() {
     }
   }
   if (!browser) throw lastLaunchError;
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+  const page = await context.newPage();
   try {
     await loginIfNeeded(page, credentials);
-    if (args.projectName && !args.projectId && !args.assigned && !args.ids.length) {
+    if (args.projectName && !args.projectId && !args.productId && !args.assigned && !args.ids.length) {
       const cachedId = cachedProjectId(args.projectName);
       if (cachedId) {
         args.projectId = cachedId;
@@ -1562,7 +1760,7 @@ async function main() {
         ctx.projectResolveReason = `${ctx.projectResolveReason || "project-name mapping"}; project id loaded from cache`;
       }
     }
-    if (args.projectName && !args.projectId && !args.assigned && !args.ids.length) {
+    if (args.projectName && !args.projectId && !args.productId && !args.assigned && !args.ids.length) {
       args.projectId = await discoverProjectId(page, args.projectName);
       if (args.projectId) {
         ctx.projectId = args.projectId;
@@ -1577,15 +1775,42 @@ async function main() {
       if (args.projectName) writeProjectCache(args.projectName, args.projectId, "explicit-or-map");
     }
 
+    let assignedIdSet = null;
+    if (!args.ids.length && isMineAssignedFilter(args)) {
+      const assignedScanArgs = {
+        ...args,
+        assignedTo: "",
+        projectName: "",
+        projectKey: "",
+        projectId: "",
+        productId: "",
+        bugStatus: "all",
+        limit: Math.max(args.limit, args.assignedScanLimit || 0),
+        detailLimit: 0,
+      };
+      const assignedRows = await collectRowsFromStart(
+        page,
+        `${SITE_URL}/my-work-bug-assignedTo.html`,
+        assignedScanArgs,
+        { applyProjectFilter: false },
+      );
+      assignedIdSet = new Set(assignedRows.map((row) => `${row.id}`));
+      ctx.assignedScanCount = assignedIdSet.size;
+      ctx.fetchMode = `${ctx.fetchMode || "current"}+mine`;
+    }
+
     const projectBugUrl = args.projectId ? await resolveProjectBugUrl(page, args.projectId, args.bugStatus) : "";
+    const productBrowseUrl = args.productId ? productBugUrl(args.productId, args.bugStatus) : "";
     const startUrl = args.ids.length
       ? `${SITE_URL}/my.html`
       : args.assigned
       ? `${SITE_URL}/my-work-bug-assignedTo.html`
       : args.projectId
       ? projectBugUrl
+      : args.productId
+      ? productBrowseUrl
       : `${SITE_URL}/bug-browse.html`;
-    let rows = await collectRowsFromStart(page, startUrl, args, { applyProjectFilter: true });
+    let rows = await collectRowsFromStart(page, startUrl, args, { applyProjectFilter: true, assignedIdSet });
     let assignedProjectFallback = false;
     let detailLimit = args.ids.length ? args.limit : Math.max(0, Math.min(args.detailLimit, args.limit));
 
@@ -1609,6 +1834,9 @@ async function main() {
     let bugs = await extractBugsFromRows(page, rows, args, attachmentRoot, detailLimit);
     if (assignedProjectFallback) {
       bugs = bugs.filter((bug) => projectNameMatches(bug.product, args.projectName));
+    }
+    if (!args.ids.length && (assignedIdSet || args.assignedTo)) {
+      bugs = bugs.filter((bug) => assignedIdSet ? assignedIdSet.has(`${bug.id}`) : rowMatchesAssignedTo(bug, args));
     }
 
     const jsonPath = path.join(outRoot, "bugs.json");

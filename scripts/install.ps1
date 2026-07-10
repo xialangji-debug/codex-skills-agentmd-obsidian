@@ -166,12 +166,13 @@ function Install-McpTools {
   $pythonCommand = Get-PythonCommand
   $nodeCommand = Get-NodeCommand
   $configToml = Join-Path $CodexHome "config.toml"
-  Add-McpServerConfig -ConfigPath $configToml -ServerName "catstudio_device" -Command $pythonCommand -Args @((Join-Path $mcpDest "catstudio-device\catstudio_device_mcp.py"))
-  Add-McpServerConfig -ConfigPath $configToml -ServerName "aboot_download" -Command $pythonCommand -Args @((Join-Path $mcpDest "aboot-download\aboot_download_mcp.py"))
+  Add-McpServerConfig -ConfigPath $configToml -ServerName "catstudio-online-log" -Command $pythonCommand -Args @((Join-Path $mcpDest "catstudio-online-log\catstudio_online_log_mcp.py"))
+  Add-McpServerConfig -ConfigPath $configToml -ServerName "aboot-download" -Command $pythonCommand -Args @((Join-Path $mcpDest "aboot-download\aboot_download_mcp.py"))
   Add-McpServerConfig -ConfigPath $configToml -ServerName "weflow-export" -Command $nodeCommand -Args @((Join-Path $mcpDest "weflow-export\weflow_export_mcp_server.js"))
 
   Write-Host "Installed MCP tools to $mcpDest"
   Write-Host "If needed, copy each *.example.json to *_config.json and edit local tool paths."
+  Write-Host "everything-search is metadata-only in this repo; configure it manually from the example file when needed."
 }
 
 Ensure-ObsidianInstalled

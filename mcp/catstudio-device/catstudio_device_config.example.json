@@ -1,7 +1,0 @@
-{
-  "catstudio_root": "C:\\Path\\To\\CATStudio_V3_1_4_89",
-  "snapshot_root": "%USERPROFILE%\\.codex\\catstudio-device\\captures",
-  "extractor_script": "%USERPROFILE%\\.codex\\skills\\catstudio-log-extractor\\scripts\\extract_catstudio_logs.py",
-  "serial_reboot_command": "AT+CFUN=1,1",
-  "serial_baudrate": 115200
-}

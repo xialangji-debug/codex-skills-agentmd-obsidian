@@ -1,4 +1,0 @@
-interface:
-  display_name: "微信聊天导出"
-  short_description: "从当前微信窗口抽取并结构化聊天记录"
-  default_prompt: "Use $wechat-chat-export to export the currently open WeChat chat to Markdown and JSONL."

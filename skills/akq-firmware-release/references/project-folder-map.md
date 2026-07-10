@@ -118,6 +118,15 @@ verified: 2026-07-02
 note: Screenshot-confirmed mapping; branch name directly matches LT52 small-program public IoT-card protocol watch.
 ```
 
+```text
+local_path: C:\Users\84365\Desktop\inside\lt52_APP_GB
+branch_contains: TW18_LT52_3602_APP公版腕表20260707
+yl_device_ver_contains: LT52_ZX_ASR3602_TW18
+fnos_folder: TW18_阿科奇_LT52_APP公版
+verified: 2026-07-08
+note: User-confirmed APP protocol branch and release folder for LT52 APP public firmware.
+```
+
 Add confirmed mappings in this format:
 
 ```text

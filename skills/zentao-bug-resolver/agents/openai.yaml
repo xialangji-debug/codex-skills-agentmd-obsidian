@@ -1,4 +1,4 @@
 interface:
   display_name: "Zentao Bug Resolver"
-  short_description: "预览并提交禅道 Bug 解决表单"
-  default_prompt: "Use $zentao-bug-resolver to preview and resolve selected Zentao bugs after local firmware fixes are verified."
+  short_description: "保留负责人并将禅道 Bug 标记为已解决"
+  default_prompt: "Use $zentao-bug-resolver to preview and mark selected Zentao bugs 已解决 while preserving the existing assignee and leaving fixed-bug comments empty by default."

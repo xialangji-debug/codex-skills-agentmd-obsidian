@@ -1,428 +1,521 @@
-from __future__ import annotations
-
 import json
 import os
-import shutil
+import re
 import subprocess
+import sys
+import tempfile
 import time
-import zipfile
-from datetime import datetime
-from pathlib import Path
-from typing import Any
-
-from mcp.server.fastmcp import FastMCP
+import traceback
 
 
-mcp = FastMCP(
-    "aboot-download",
-    instructions=(
-        "Tools for ASR AbootDownload flashing. Use for locating release packages, "
-        "checking AbootDownload/adownload status, listing devices, building safe flashing commands, "
-        "and running adownload only with explicit confirmation."
-    ),
+SERVER_NAME = "aboot-download"
+SERVER_VERSION = "0.1.0"
+HOME = os.path.expanduser("~")
+DEFAULT_TOOL = os.environ.get(
+    "ABOOT_DOWNLOAD_TOOL",
+    os.path.join(HOME, "Desktop", "aboot-tools-2023.08.27-win-x64", "adownload.exe"),
 )
-
-SERVER_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = SERVER_DIR / "aboot_download_config.json"
-EXAMPLE_CONFIG_PATH = SERVER_DIR / "aboot_download_config.example.json"
-
-DEFAULT_CONFIG: dict[str, Any] = {
-    "aboot_root": r"C:\Path\To\aboot-tools-win-x64",
-    "run_log_root": str(Path.home() / ".codex" / "aboot-download" / "runs"),
-    "default_search_roots": [
-        str(Path.home() / ".codex" / "worktrees"),
-        str(Path.home() / "Downloads"),
-    ],
-    "default_baudrate": 115200,
-    "default_timeout_sec": 900,
-}
-
-REQUIRED_RELEASE_MEMBERS = {"download.json", "firmware.bin", "flasher.img"}
-SUPPORTED_BAUDRATES = {115200, 230400, 460800, 921600, 1842000, 3686400}
+FALLBACK_TOOL = os.path.join(
+    HOME,
+    "Desktop",
+    "inside",
+    "lt52_XCX_GB_WK",
+    "prebuilts",
+    "misc",
+    "windows-x86",
+    "adownload.exe",
+)
+DEFAULT_PORTS = os.environ.get("ABOOT_DEFAULT_PORTS", "COM14")
+DEFAULT_SEARCH_ROOT = os.path.join(HOME, "Desktop", "inside")
+LOG_DIR = os.path.join(HOME, ".codex", "aboot-download", "logs")
+CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
-def _read_config_file() -> dict[str, Any]:
-    for path in (CONFIG_PATH, EXAMPLE_CONFIG_PATH):
-        if path.exists():
-            with path.open("r", encoding="utf-8") as f:
-                return json.load(f)
-    return {}
+TOOLS = [
+    {
+        "name": "aboot_status",
+        "description": "Inspect local Aboot/adownload readiness: tool path, ASR USB devices, visible COM ports, and CATStudio/adownload blockers.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "releasePackage": {"type": "string", "description": "Optional firmware zip path to validate."},
+                "adownloadPath": {"type": "string", "description": "Optional adownload.exe path."},
+                "ports": {
+                    "description": "Preferred serial ports, either comma-separated string or string array.",
+                    "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                },
+            },
+        },
+    },
+    {
+        "name": "aboot_list_release_packages",
+        "description": "Find recent ASR release package zip files under a workspace root. Source zips are excluded by default.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "root": {"type": "string", "default": DEFAULT_SEARCH_ROOT},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+                "includeSource": {"type": "boolean", "default": False},
+            },
+        },
+    },
+    {
+        "name": "aboot_kill_download_processes",
+        "description": "Stop stale adownload.exe processes. CATStudio and AbootDownload GUI are closed only when explicitly requested.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "closeCatstudio": {"type": "boolean", "default": False},
+                "closeAbootGui": {"type": "boolean", "default": False},
+            },
+        },
+    },
+    {
+        "name": "aboot_flash",
+        "description": "Run adownload.exe to flash an ASR release package. Saves stdout/stderr to a timestamped log and returns structured status.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["releasePackage"],
+            "properties": {
+                "releasePackage": {"type": "string", "description": "Firmware release zip. Do not use *_source.zip."},
+                "ports": {
+                    "description": "Serial ports, comma-separated string or string array. Default comes from ABOOT_DEFAULT_PORTS.",
+                    "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                },
+                "adownloadPath": {"type": "string", "description": "Optional adownload.exe path."},
+                "baud": {"type": "integer", "default": 115200},
+                "autoEnableUsb": {"type": "boolean", "default": True},
+                "atFallback": {"type": "boolean", "default": True},
+                "usbOnly": {"type": "boolean", "default": False},
+                "reboot": {"type": "boolean", "default": True},
+                "production": {"type": "boolean", "default": False},
+                "quit": {"type": "boolean", "default": True},
+                "closeCatstudio": {"type": "boolean", "default": False},
+                "closeAbootGui": {"type": "boolean", "default": False},
+                "killExistingAdownload": {"type": "boolean", "default": True},
+                "timeoutSec": {"type": "integer", "minimum": 30, "maximum": 3600, "default": 900},
+                "dryRun": {"type": "boolean", "default": False},
+            },
+        },
+    },
+]
 
 
-def _load_config() -> dict[str, Any]:
-    cfg = DEFAULT_CONFIG.copy()
-    cfg.update(_read_config_file())
-    root = Path(os.path.expandvars(os.environ.get("ABOOT_ROOT") or cfg["aboot_root"]))
-    cfg["aboot_root"] = str(root)
-    cfg["aboot_gui"] = str(root / "aboot.exe")
-    cfg["adownload"] = str(root / "adownload.exe")
-    cfg["arelease"] = str(root / "arelease.exe")
-    cfg["run_log_root"] = os.path.expandvars(os.environ.get("ABOOT_RUN_LOG_ROOT") or cfg["run_log_root"])
-    search_roots = os.environ.get("ABOOT_SEARCH_ROOTS")
-    if search_roots:
-        cfg["default_search_roots"] = [item for item in search_roots.split(os.pathsep) if item]
+def ensure_log_dir():
+    os.makedirs(LOG_DIR, exist_ok=True)
+
+
+def normalize_ports(value):
+    if value is None:
+        value = DEFAULT_PORTS
+    if isinstance(value, list):
+        parts = value
     else:
-        cfg["default_search_roots"] = [os.path.expandvars(str(item)) for item in cfg.get("default_search_roots", [])]
-    return cfg
+        parts = str(value).split(",")
+    clean = []
+    for part in parts:
+        port = str(part).strip()
+        if port:
+            clean.append(port.upper())
+    return clean or [DEFAULT_PORTS]
 
 
-def _jsonable_time(ts: float | None) -> str:
-    if not ts:
-        return ""
-    return datetime.fromtimestamp(ts).astimezone().isoformat(timespec="seconds")
-
-
-def _run(args: list[str], timeout: int = 20, cwd: str | None = None) -> dict[str, Any]:
+def run_process(args, timeout=20):
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             args,
-            cwd=cwd,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            timeout=timeout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            universal_newlines=True,
+            creationflags=CREATE_NO_WINDOW,
         )
-        return {
-            "ok": proc.returncode == 0,
-            "returncode": proc.returncode,
-            "stdout": proc.stdout.strip(),
-            "stderr": proc.stderr.strip(),
-            "command": args,
-        }
-    except subprocess.TimeoutExpired as exc:
-        return {
-            "ok": False,
-            "returncode": None,
-            "stdout": (exc.stdout or "").strip() if isinstance(exc.stdout, str) else "",
-            "stderr": f"timeout after {timeout}s",
-            "command": args,
-        }
-    except Exception as exc:  # noqa: BLE001 - tool errors should be visible.
-        return {"ok": False, "returncode": None, "stdout": "", "stderr": str(exc), "command": args}
+        stdout, stderr = proc.communicate(timeout=timeout)
+        return {"ok": proc.returncode == 0, "returncode": proc.returncode, "stdout": stdout, "stderr": stderr}
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        stdout, stderr = proc.communicate()
+        return {"ok": False, "returncode": None, "stdout": stdout, "stderr": stderr, "timeout": True}
+    except Exception as exc:
+        return {"ok": False, "returncode": None, "stdout": "", "stderr": str(exc)}
 
 
-def _powershell(script: str, timeout: int = 20) -> dict[str, Any]:
-    return _run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], timeout=timeout)
-
-
-def _parse_json_maybe(text: str) -> Any:
-    if not text:
-        return []
-    try:
-        parsed = json.loads(text)
-        return parsed if isinstance(parsed, list) else [parsed]
-    except json.JSONDecodeError:
-        return [{"raw": text}]
-
-
-def _aboot_processes() -> list[dict[str, Any]]:
-    ps = (
-        "$p = Get-Process -Name aboot,adownload,arelease,ASRFotaTools -ErrorAction SilentlyContinue | "
-        "Select-Object Id,ProcessName,Path,StartTime; "
-        "if ($p) { $p | ConvertTo-Json -Compress }"
+def run_powershell(script, timeout=20):
+    result = run_process(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        timeout=timeout,
     )
-    out = _powershell(ps, timeout=8)
-    return _parse_json_maybe(out.get("stdout", ""))
-
-
-def _package_info(path: Path) -> dict[str, Any]:
-    info: dict[str, Any] = {
-        "path": str(path),
-        "name": path.name,
-        "exists": path.exists(),
-        "is_zip": path.suffix.lower() == ".zip",
-        "is_source_package": "source" in path.name.lower(),
-        "valid_release_package": False,
-        "size": 0,
-        "modified": "",
-        "members_preview": [],
-        "required_members_present": [],
-        "required_members_missing": sorted(REQUIRED_RELEASE_MEMBERS),
-        "download_json": None,
-        "error": "",
-    }
-    if not path.exists():
-        info["error"] = "file not found"
-        return info
+    if not result.get("stdout", "").strip():
+        return result, None
     try:
-        stat = path.stat()
-        info["size"] = stat.st_size
-        info["modified"] = _jsonable_time(stat.st_mtime)
-        if path.suffix.lower() != ".zip":
-            info["error"] = "not a zip file"
-            return info
-        with zipfile.ZipFile(path, "r") as zf:
-            names = zf.namelist()
-            normalized = {Path(name).name for name in names if not name.endswith("/")}
-            info["members_preview"] = names[:80]
-            present = sorted(REQUIRED_RELEASE_MEMBERS & normalized)
-            missing = sorted(REQUIRED_RELEASE_MEMBERS - normalized)
-            info["required_members_present"] = present
-            info["required_members_missing"] = missing
-            info["valid_release_package"] = not missing and not info["is_source_package"]
-            download_member = next((name for name in names if Path(name).name == "download.json"), "")
-            if download_member:
-                try:
-                    raw = zf.read(download_member).decode("utf-8", errors="replace")
-                    info["download_json"] = json.loads(raw)
-                except Exception as exc:  # noqa: BLE001
-                    info["download_json"] = {"parse_error": str(exc)}
-    except Exception as exc:  # noqa: BLE001
-        info["error"] = str(exc)
+        return result, json.loads(result["stdout"])
+    except Exception:
+        return result, None
+
+
+def detect_adownload(path=None):
+    candidates = []
+    if path:
+        candidates.append(path)
+    candidates.append(DEFAULT_TOOL)
+    candidates.append(FALLBACK_TOOL)
+    for item in candidates:
+        if item and os.path.exists(item):
+            return os.path.abspath(item)
+    return os.path.abspath(candidates[0]) if candidates else DEFAULT_TOOL
+
+
+def get_processes():
+    script = r"""
+$items = Get-Process | Where-Object { $_.ProcessName -match '^(CATStudio|adownload|aboot)$' } |
+    Select-Object ProcessName,Id,CPU,StartTime,Responding
+$items | ConvertTo-Json -Depth 4
+"""
+    _, data = run_powershell(script, timeout=10)
+    if data is None:
+        return []
+    if isinstance(data, dict):
+        return [data]
+    return data
+
+
+def get_asr_devices():
+    script = r"""
+$items = Get-CimInstance Win32_PnPEntity |
+    Where-Object { $_.Name -match 'ASR|Serial Download|USB Download|Modem|COM14|COM15|COM16|VID_2ECC|PID_3010' -or $_.DeviceID -match 'VID_2ECC|PID_3010' } |
+    Select-Object Name,Status,ConfigManagerErrorCode,DeviceID
+$items | ConvertTo-Json -Depth 4
+"""
+    _, data = run_powershell(script, timeout=15)
+    if data is None:
+        return []
+    if isinstance(data, dict):
+        return [data]
+    return data
+
+
+def get_serial_devices():
+    script = r"""
+$items = Get-CimInstance Win32_PnPEntity |
+    Where-Object { $_.Name -match '\(COM[0-9]+\)' } |
+    Select-Object Name,Status,ConfigManagerErrorCode,DeviceID
+$items | ConvertTo-Json -Depth 4
+"""
+    _, data = run_powershell(script, timeout=15)
+    if data is None:
+        return []
+    if isinstance(data, dict):
+        return [data]
+    return data
+
+
+def get_visible_ports():
+    script = r"""
+[System.IO.Ports.SerialPort]::GetPortNames() | Sort-Object | ConvertTo-Json
+"""
+    _, data = run_powershell(script, timeout=10)
+    if data is None:
+        return []
+    if isinstance(data, str):
+        return [data]
+    return data
+
+
+def validate_package(path):
+    if not path:
+        return {"path": None, "exists": False}
+    abs_path = os.path.abspath(path)
+    info = {"path": abs_path, "exists": os.path.exists(abs_path), "isSourceZip": abs_path.lower().endswith("_source.zip")}
+    if info["exists"]:
+        stat = os.stat(abs_path)
+        info["sizeBytes"] = stat.st_size
+        info["mtime"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
     return info
 
 
-def _candidate_roots(extra_roots: list[str] | None = None) -> list[Path]:
-    cfg = _load_config()
-    roots = [Path(p) for p in cfg.get("default_search_roots", [])]
-    for item in extra_roots or []:
-        if item:
-            roots.append(Path(item))
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for root in roots:
-        key = str(root.resolve()) if root.exists() else str(root)
-        if key not in seen:
-            seen.add(key)
-            unique.append(root)
-    return unique
-
-
-def _find_release_packages(search_roots: list[str] | None = None, limit: int = 30) -> list[dict[str, Any]]:
-    packages: list[Path] = []
-    for root in _candidate_roots(search_roots):
-        if not root.exists():
-            continue
-        try:
-            for path in root.rglob("*.zip"):
-                name = path.name.lower()
-                if any(token in name for token in ["asr", "tw", "lt", "c10", "craneg", "aboot", "release", "3602"]):
-                    packages.append(path)
-        except OSError:
-            continue
-    packages.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
-    out: list[dict[str, Any]] = []
-    for path in packages[:200]:
-        info = _package_info(path)
-        out.append(
-            {
-                "path": info["path"],
-                "name": info["name"],
-                "size": info["size"],
-                "modified": info["modified"],
-                "valid_release_package": info["valid_release_package"],
-                "is_source_package": info["is_source_package"],
-                "missing": info["required_members_missing"],
-            }
-        )
-    out.sort(key=lambda item: (item["valid_release_package"], not item["is_source_package"], item["modified"]), reverse=True)
-    return out[: max(1, min(limit, 200))]
-
-
-def _build_adownload_args(
-    package_path: str,
-    ports: list[str] | None,
-    usb_only: bool,
-    auto_enable_usb: bool,
-    baudrate: int,
-    at_fallback: bool,
-    reboot_after: bool,
-    production_mode: bool,
-    dump_enable: bool,
-    quit_after: bool,
-) -> list[str]:
-    cfg = _load_config()
-    args = [cfg["adownload"]]
-    clean_ports = [p.strip() for p in (ports or []) if p and p.strip()]
-    if clean_ports:
-        args.extend(["-p", ",".join(clean_ports)])
-    if usb_only:
-        args.append("-u")
-    if auto_enable_usb:
-        args.append("-a")
-    if at_fallback:
-        args.append("-f")
-    if reboot_after:
-        args.append("-r")
-    if production_mode:
-        args.append("-m")
-    if dump_enable:
-        args.append("-d")
-    if quit_after:
-        args.append("-q")
-    args.extend(["-s", str(baudrate), package_path])
-    return args
-
-
-def _safe_run_dir(package_path: Path) -> Path:
-    cfg = _load_config()
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_name = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in package_path.stem)[:80]
-    return Path(cfg["run_log_root"]) / f"{stamp}_{safe_name}"
-
-
-@mcp.tool()
-def aboot_status() -> dict[str, Any]:
-    """Return AbootDownload/adownload paths, help text, running processes, and recent release-package candidates."""
-    cfg = _load_config()
-    root = Path(cfg["aboot_root"])
-    adownload = Path(cfg["adownload"])
-    help_result = _run([str(adownload), "--help"], timeout=10, cwd=str(root)) if adownload.exists() else {"ok": False, "stderr": "adownload not found"}
+def status(args):
+    tool = detect_adownload(args.get("adownloadPath"))
+    package = validate_package(args.get("releasePackage"))
+    ports = normalize_ports(args.get("ports"))
+    processes = get_processes()
+    catstudio = [p for p in processes if str(p.get("ProcessName", "")).lower() == "catstudio"]
+    adownload = [p for p in processes if str(p.get("ProcessName", "")).lower() == "adownload"]
+    aboot = [p for p in processes if str(p.get("ProcessName", "")).lower() == "aboot"]
     return {
-        "aboot_root": str(root),
-        "aboot_root_exists": root.exists(),
-        "aboot_gui": cfg["aboot_gui"],
-        "aboot_gui_exists": Path(cfg["aboot_gui"]).exists(),
-        "adownload": cfg["adownload"],
-        "adownload_exists": adownload.exists(),
-        "arelease": cfg["arelease"],
-        "arelease_exists": Path(cfg["arelease"]).exists(),
-        "processes": _aboot_processes(),
-        "help": help_result,
-        "recent_packages": _find_release_packages(limit=8),
+        "adownloadPath": tool,
+        "adownloadExists": os.path.exists(tool),
+        "releasePackage": package,
+        "requestedPorts": ports,
+        "visiblePorts": get_visible_ports(),
+        "serialDevices": get_serial_devices(),
+        "asrDevices": get_asr_devices(),
+        "processes": processes,
+        "blockers": {
+            "catstudioRunning": bool(catstudio),
+            "adownloadRunning": bool(adownload),
+            "abootGuiRunning": bool(aboot),
+            "note": "CATStudio Logger/UeConsole and AbootDownload GUI can hold ASR COM ports or leave workers. Close them before flashing or call aboot_flash with closeCatstudio=true / closeAbootGui=true.",
+        },
     }
 
 
-@mcp.tool()
-def list_release_packages(search_roots: list[str] | None = None, limit: int = 30) -> dict[str, Any]:
-    """Find likely AbootDownload release .zip packages and mark valid flashing packages."""
-    return {"packages": _find_release_packages(search_roots=search_roots, limit=limit)}
+def list_release_packages(args):
+    root = os.path.abspath(args.get("root") or DEFAULT_SEARCH_ROOT)
+    limit = int(args.get("limit") or 20)
+    include_source = bool(args.get("includeSource", False))
+    results = []
+    if not os.path.isdir(root):
+        return {"root": root, "exists": False, "packages": []}
+    for dirpath, dirnames, filenames in os.walk(root):
+        lower_dir = dirpath.lower()
+        if any(part in lower_dir for part in [os.sep + ".git", os.sep + ".venv", os.sep + "node_modules"]):
+            dirnames[:] = []
+            continue
+        if not any(key in lower_dir for key in ["out", "release", "upload", "product"]):
+            if dirpath != root and len(results) >= limit:
+                break
+        for filename in filenames:
+            lower = filename.lower()
+            if not lower.endswith(".zip"):
+                continue
+            if not include_source and lower.endswith("_source.zip"):
+                continue
+            full = os.path.join(dirpath, filename)
+            try:
+                stat = os.stat(full)
+            except OSError:
+                continue
+            results.append(
+                {
+                    "path": full,
+                    "sizeBytes": stat.st_size,
+                    "mtime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
+                }
+            )
+    results.sort(key=lambda item: item["mtime"], reverse=True)
+    return {"root": root, "exists": True, "packages": results[:limit]}
 
 
-@mcp.tool()
-def inspect_release_package(package_path: str) -> dict[str, Any]:
-    """Inspect a release package zip and verify required AbootDownload members."""
-    return _package_info(Path(package_path))
+def kill_download_processes(args):
+    close_catstudio = bool(args.get("closeCatstudio", False))
+    close_aboot_gui = bool(args.get("closeAbootGui", False))
+    names = ["adownload"]
+    if close_catstudio:
+        names.append("CATStudio")
+    if close_aboot_gui:
+        names.append("aboot")
+    killed = []
+    for proc in get_processes():
+        name = str(proc.get("ProcessName", ""))
+        pid = proc.get("Id")
+        if name.lower() in [n.lower() for n in names] and pid:
+            result = run_process(["powershell", "-NoProfile", "-Command", "Stop-Process -Id %s -Force" % int(pid)], timeout=10)
+            killed.append({"processName": name, "pid": pid, "ok": result["ok"], "stderr": result.get("stderr", "")})
+    return {"closeCatstudio": close_catstudio, "closeAbootGui": close_aboot_gui, "killed": killed, "remainingProcesses": get_processes()}
 
 
-@mcp.tool()
-def list_flash_devices(include_pnp: bool = True) -> dict[str, Any]:
-    """List serial COM ports and likely ASR/USB/bootrom devices for flashing."""
-    serial_ps = (
-        "Get-CimInstance Win32_SerialPort | "
-        "Select-Object DeviceID,Name,Description,PNPDeviceID | ConvertTo-Json -Compress"
-    )
-    serial_result = _powershell(serial_ps, timeout=8)
-    result: dict[str, Any] = {
-        "serial_ports": _parse_json_maybe(serial_result.get("stdout", "")),
-        "serial_query": serial_result,
-    }
-    if include_pnp:
-        pnp_ps = (
-            "$d = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | "
-            "Where-Object { $_.FriendlyName -match 'ASR|Aboot|Arom|Boot|USB|Serial|COM|Modem|MUSB|Android|Diag' } | "
-            "Select-Object Class,FriendlyName,InstanceId,Status; "
-            "if ($d) { $d | ConvertTo-Json -Compress }"
-        )
-        pnp_result = _powershell(pnp_ps, timeout=12)
-        result["pnp_devices"] = _parse_json_maybe(pnp_result.get("stdout", ""))
-        result["pnp_query"] = pnp_result
-    return result
+def build_flash_command(args, tool, package_path, ports):
+    cmd = [tool]
+    if ports:
+        cmd += ["-p", ",".join(ports)]
+    if bool(args.get("autoEnableUsb", True)):
+        cmd.append("-a")
+    if bool(args.get("usbOnly", False)):
+        cmd.append("-u")
+    if bool(args.get("atFallback", True)):
+        cmd.append("-f")
+    cmd += ["-s", str(int(args.get("baud") or 115200))]
+    if bool(args.get("production", False)):
+        cmd.append("-m")
+    if bool(args.get("reboot", True)):
+        cmd.append("-r")
+    if bool(args.get("quit", True)):
+        cmd.append("-q")
+    cmd.append(package_path)
+    return cmd
 
 
-@mcp.tool()
-def build_flash_command(
-    package_path: str,
-    ports: list[str] | None = None,
-    usb_only: bool = True,
-    auto_enable_usb: bool = True,
-    baudrate: int = 115200,
-    at_fallback: bool = False,
-    reboot_after: bool = False,
-    production_mode: bool = False,
-    dump_enable: bool = False,
-    quit_after: bool = True,
-) -> dict[str, Any]:
-    """Build the adownload.exe command without flashing."""
-    baudrate = int(baudrate)
-    if baudrate not in SUPPORTED_BAUDRATES:
-        return {"ok": False, "error": f"unsupported baudrate: {baudrate}", "supported_baudrates": sorted(SUPPORTED_BAUDRATES)}
-    info = _package_info(Path(package_path))
-    args = _build_adownload_args(package_path, ports, usb_only, auto_enable_usb, baudrate, at_fallback, reboot_after, production_mode, dump_enable, quit_after)
-    return {
-        "ok": bool(info["valid_release_package"]),
-        "command": args,
-        "command_line": subprocess.list2cmdline(args),
-        "package": info,
-        "will_refuse_to_flash": not info["valid_release_package"],
-    }
+def flash(args):
+    package_info = validate_package(args.get("releasePackage"))
+    if not package_info["exists"]:
+        return {"status": "ERROR", "error": "releasePackage does not exist", "releasePackage": package_info}
+    if package_info.get("isSourceZip"):
+        return {"status": "ERROR", "error": "refusing to flash *_source.zip", "releasePackage": package_info}
 
+    tool = detect_adownload(args.get("adownloadPath"))
+    if not os.path.exists(tool):
+        return {"status": "ERROR", "error": "adownload.exe not found", "adownloadPath": tool}
 
-@mcp.tool()
-def flash_release_package(
-    package_path: str,
-    confirm: bool = False,
-    ports: list[str] | None = None,
-    usb_only: bool = True,
-    auto_enable_usb: bool = True,
-    baudrate: int = 115200,
-    at_fallback: bool = False,
-    reboot_after: bool = False,
-    production_mode: bool = False,
-    dump_enable: bool = False,
-    quit_after: bool = True,
-    timeout_sec: int = 900,
-) -> dict[str, Any]:
-    """Flash a release package with adownload.exe. Refuses unless confirm=true and package is valid."""
-    baudrate = int(baudrate)
-    if baudrate not in SUPPORTED_BAUDRATES:
-        return {"ok": False, "error": f"unsupported baudrate: {baudrate}", "supported_baudrates": sorted(SUPPORTED_BAUDRATES)}
-    pkg = Path(package_path)
-    info = _package_info(pkg)
-    args = _build_adownload_args(str(pkg), ports, usb_only, auto_enable_usb, baudrate, at_fallback, reboot_after, production_mode, dump_enable, quit_after)
-    if not confirm:
+    ports = normalize_ports(args.get("ports"))
+    cmd = build_flash_command(args, tool, package_info["path"], ports)
+    if bool(args.get("dryRun", False)):
+        return {"status": "DRY_RUN", "command": cmd, "preflight": status(args)}
+
+    if bool(args.get("killExistingAdownload", True)):
+        kill_download_processes({"closeCatstudio": False, "closeAbootGui": False})
+
+    if bool(args.get("closeCatstudio", False)):
+        kill_download_processes({"closeCatstudio": True, "closeAbootGui": False})
+    if bool(args.get("closeAbootGui", False)):
+        kill_download_processes({"closeCatstudio": False, "closeAbootGui": True})
+
+    blockers = []
+    for proc in get_processes():
+        name = str(proc.get("ProcessName", "")).lower()
+        if name == "catstudio" and not bool(args.get("closeCatstudio", False)):
+            blockers.append(proc)
+        if name == "aboot" and not bool(args.get("closeAbootGui", False)):
+            blockers.append(proc)
+    if blockers:
         return {
-            "ok": False,
-            "error": "refused: pass confirm=true to flash a device",
-            "command": args,
-            "command_line": subprocess.list2cmdline(args),
-            "package": info,
+            "status": "BLOCKED",
+            "error": "CATStudio or AbootDownload GUI is running and may hold ASR COM ports. Re-run with closeCatstudio=true and/or closeAbootGui=true after saving logs.",
+            "processes": blockers,
+            "preflight": status(args),
         }
-    if not info["valid_release_package"]:
-        return {"ok": False, "error": "refused: package is not a valid non-source Aboot release zip", "package": info}
-    run_dir = _safe_run_dir(pkg)
-    run_dir.mkdir(parents=True, exist_ok=True)
-    copied_package = run_dir / pkg.name
+
+    ensure_log_dir()
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    log_path = os.path.join(LOG_DIR, "aboot_flash_%s.log" % timestamp)
+    timeout_sec = int(args.get("timeoutSec") or 900)
+    start = time.time()
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        universal_newlines=True,
+        creationflags=CREATE_NO_WINDOW,
+    )
+    timed_out = False
     try:
-        shutil.copy2(pkg, copied_package)
-    except OSError:
-        copied_package = pkg
-    args = _build_adownload_args(str(copied_package), ports, usb_only, auto_enable_usb, baudrate, at_fallback, reboot_after, production_mode, dump_enable, quit_after)
-    started = datetime.now().astimezone().isoformat(timespec="seconds")
-    result = _run(args, timeout=max(30, min(int(timeout_sec), 7200)), cwd=str(Path(_load_config()["aboot_root"])))
-    finished = datetime.now().astimezone().isoformat(timespec="seconds")
-    run_meta = {
-        "started": started,
-        "finished": finished,
-        "package_source": str(pkg),
-        "package_used": str(copied_package),
-        "package": info,
-        "command": args,
-        "result": result,
+        output, _ = proc.communicate(timeout=timeout_sec)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        proc.kill()
+        output, _ = proc.communicate()
+
+    elapsed = round(time.time() - start, 2)
+    with open(log_path, "w", encoding="utf-8", errors="replace") as handle:
+        handle.write("$ " + " ".join(cmd) + "\n")
+        handle.write(output or "")
+
+    success = (not timed_out) and proc.returncode == 0 and re.search(r'"?status"?\s*:\s*"?SUCCEEDED"?|SUCCEEDED', output or "", re.I)
+    failed = re.search(r'"?status"?\s*:\s*"?FAILED"?|FAILED|ERROR', output or "", re.I)
+    tail = (output or "")[-5000:]
+    return {
+        "status": "SUCCEEDED" if success else ("TIMEOUT" if timed_out else ("FAILED" if failed or proc.returncode else "UNKNOWN")),
+        "returncode": proc.returncode,
+        "timedOut": timed_out,
+        "elapsedSec": elapsed,
+        "command": cmd,
+        "logPath": log_path,
+        "outputTail": tail,
+        "postStatus": status(args),
     }
-    (run_dir / "flash_run.json").write_text(json.dumps(run_meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    (run_dir / "stdout.txt").write_text(result.get("stdout", ""), encoding="utf-8")
-    (run_dir / "stderr.txt").write_text(result.get("stderr", ""), encoding="utf-8")
-    return {"ok": result["ok"], "run_dir": str(run_dir), "result": result, "package_used": str(copied_package)}
 
 
-@mcp.tool()
-def open_aboot_gui(package_path: str = "") -> dict[str, Any]:
-    """Open the AbootDownload GUI. This does not press Start or flash automatically."""
-    cfg = _load_config()
-    exe = Path(cfg["aboot_gui"])
-    if not exe.exists():
-        return {"ok": False, "error": f"aboot.exe not found: {exe}"}
-    args = [str(exe)]
-    if package_path:
-        args.append(package_path)
-    try:
-        subprocess.Popen(args, cwd=str(exe.parent))
-        return {"ok": True, "command": args, "note": "GUI opened; MCP did not press Start."}
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": str(exc), "command": args}
+def call_tool(name, args):
+    args = args or {}
+    if name == "aboot_status":
+        return status(args)
+    if name == "aboot_list_release_packages":
+        return list_release_packages(args)
+    if name == "aboot_kill_download_processes":
+        return kill_download_processes(args)
+    if name == "aboot_flash":
+        return flash(args)
+    raise ValueError("Unknown tool: %s" % name)
+
+
+def content_result(payload, is_error=False):
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": json.dumps(payload, ensure_ascii=False, indent=2),
+            }
+        ],
+        "isError": bool(is_error),
+    }
+
+
+def handle_request(message):
+    method = message.get("method")
+    params = message.get("params") or {}
+    if method == "initialize":
+        return {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
+        }
+    if method == "tools/list":
+        return {"tools": TOOLS}
+    if method == "tools/call":
+        name = params.get("name")
+        args = params.get("arguments") or {}
+        try:
+            return content_result(call_tool(name, args))
+        except Exception as exc:
+            return content_result({"error": str(exc), "traceback": traceback.format_exc()}, is_error=True)
+    if method in ("ping", "notifications/initialized"):
+        return {}
+    if method in ("resources/list", "prompts/list"):
+        return {"resources": []} if method == "resources/list" else {"prompts": []}
+    return {}
+
+
+def read_message(stdin):
+    headers = {}
+    while True:
+        line = stdin.readline()
+        if not line:
+            return None
+        line = line.decode("utf-8")
+        if line in ("\r\n", "\n"):
+            break
+        key, _, value = line.partition(":")
+        headers[key.strip().lower()] = value.strip()
+    length = int(headers.get("content-length", "0"))
+    if length <= 0:
+        return None
+    body = stdin.read(length)
+    return json.loads(body.decode("utf-8"))
+
+
+def write_message(stdout, payload):
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    stdout.write(("Content-Length: %d\r\n\r\n" % len(body)).encode("ascii"))
+    stdout.write(body)
+    stdout.flush()
+
+
+def serve():
+    stdin = sys.stdin.buffer
+    stdout = sys.stdout.buffer
+    while True:
+        message = read_message(stdin)
+        if message is None:
+            break
+        if "id" not in message:
+            continue
+        response = {"jsonrpc": "2.0", "id": message.get("id")}
+        try:
+            response["result"] = handle_request(message)
+        except Exception as exc:
+            response["error"] = {"code": -32000, "message": str(exc), "data": traceback.format_exc()}
+        write_message(stdout, response)
+
+
+def self_test():
+    print(json.dumps({"server": SERVER_NAME, "tools": [tool["name"] for tool in TOOLS], "status": status({})}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
-    mcp.run()
+    if len(sys.argv) > 1 and sys.argv[1] == "--self-test":
+        self_test()
+    else:
+        serve()

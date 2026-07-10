@@ -5,6 +5,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { execFileSync, spawnSync } = require("child_process");
+const Module = require("module");
 
 const SITE_URL = "https://fnos.yuelaniot.com:5667";
 const DEFAULT_TEAM = "阿科奇";
@@ -23,7 +24,8 @@ Options:
   --readme <path>                 User-provided readme.txt to upload.
   --include-readme                Include <upload-dir>/readme.txt if present.
   --keep-device-ver               Keep yl_device_ver unchanged while using --release-time only as the remote folder.
-  --remote-product-folder <name>  Product folder under 阿科奇-国内. Default: project-folder-map.md or heuristic.
+  --remote-root-folder <name>     Root folder under the team. Default: 阿科奇-国内.
+  --remote-product-folder <name>  Product folder under the selected root. Default: project-folder-map.md or heuristic.
   --resolve-only                  Resolve release names and product folder, then exit without login/upload.
   --create-missing-folder         Deprecated alias; timestamp folders are created automatically for real uploads.
   --no-create-missing-folder      Refuse to create a missing timestamp release folder.
@@ -88,6 +90,9 @@ function parseArgs(argv) {
       case "--remote-product-folder":
         args.remoteProductFolder = next();
         break;
+      case "--remote-root-folder":
+        args.remoteRootFolder = next();
+        break;
       case "--resolve-only":
         args.resolveOnly = true;
         break;
@@ -127,23 +132,41 @@ function parseArgs(argv) {
 }
 
 function requirePlaywright() {
+  const bundledNodeModules = path.join(
+    os.homedir(),
+    ".cache",
+    "codex-runtimes",
+    "codex-primary-runtime",
+    "dependencies",
+    "node",
+    "node_modules"
+  );
+  const bundledPnpmNodeModules = path.join(bundledNodeModules, ".pnpm", "node_modules");
+  if (fs.existsSync(bundledPnpmNodeModules) && !Module.globalPaths.includes(bundledPnpmNodeModules)) {
+    Module.globalPaths.unshift(bundledPnpmNodeModules);
+  }
+
   try {
     return require("playwright");
   } catch (_) {
-    const bundled = path.join(
-      os.homedir(),
-      ".cache",
-      "codex-runtimes",
-      "codex-primary-runtime",
-      "dependencies",
-      "node",
-      "node_modules",
-      "playwright"
-    );
+    const bundled = path.join(bundledNodeModules, "playwright");
+    const pnpmPlaywrightRoot = path.join(bundledNodeModules, ".pnpm");
     try {
       return require(bundled);
     } catch (error) {
-      fail(`Cannot load Playwright. Tried normal require and ${bundled}. ${error.message}`);
+      const pnpmCandidates = fs.existsSync(pnpmPlaywrightRoot)
+        ? fs.readdirSync(pnpmPlaywrightRoot)
+          .filter((name) => name.startsWith("playwright@"))
+          .map((name) => path.join(pnpmPlaywrightRoot, name, "node_modules", "playwright"))
+        : [];
+      for (const candidate of pnpmCandidates) {
+        try {
+          return require(candidate);
+        } catch (_) {
+          // Try the next pnpm candidate.
+        }
+      }
+      fail(`Cannot load Playwright. Tried normal require, ${bundled}, and pnpm candidates. ${error.message}`);
     }
   }
 }
@@ -453,36 +476,37 @@ async function recursiveFindFolder(page, rootPath, targetName, maxDepth) {
   return found;
 }
 
-async function resolveRemoteTarget(page, { productFolder, releaseTime, deviceVer, branch, createMissingFolder, dryRun }) {
+async function resolveRemoteTarget(page, { rootFolder, productFolder, releaseTime, deviceVer, branch, createMissingFolder, dryRun }) {
   const teams = await pageCollectFiles(page, "", true);
   const team = findByName(teams, DEFAULT_TEAM);
   if (!team) fail(`Could not find team folder: ${DEFAULT_TEAM}`);
 
   const teamPath = team.path;
   let teamChildren = await pageCollectFiles(page, teamPath);
-  let domestic = findByName(teamChildren, DEFAULT_DOMESTIC);
-  if (!domestic) {
-    const matches = await recursiveFindFolder(page, teamPath, DEFAULT_DOMESTIC, 2);
-    if (matches.length !== 1) fail(`Could not uniquely find ${DEFAULT_DOMESTIC}`);
-    domestic = matches[0];
+  const finalRootFolder = rootFolder || DEFAULT_DOMESTIC;
+  let releaseRoot = findByName(teamChildren, finalRootFolder);
+  if (!releaseRoot) {
+    const matches = await recursiveFindFolder(page, teamPath, finalRootFolder, 2);
+    if (matches.length !== 1) fail(`Could not uniquely find ${finalRootFolder}`);
+    releaseRoot = matches[0];
   } else {
-    domestic.path = `${teamPath}/${domestic.name}`;
+    releaseRoot.path = `${teamPath}/${releaseRoot.name}`;
   }
 
-  const domesticPath = domestic.path;
-  const domesticChildren = await pageCollectFiles(page, domesticPath);
+  const releaseRootPath = releaseRoot.path;
+  const releaseRootChildren = await pageCollectFiles(page, releaseRootPath);
   let finalProductFolder = productFolder;
-  if (!finalProductFolder) finalProductFolder = heuristicProductFolder(deviceVer, branch, domesticChildren.filter((item) => item.dir === 1));
+  if (!finalProductFolder) finalProductFolder = heuristicProductFolder(deviceVer, branch, releaseRootChildren.filter((item) => item.dir === 1));
 
-  let product = findByName(domesticChildren, finalProductFolder);
+  let product = findByName(releaseRootChildren, finalProductFolder);
   if (!product) {
     const matches = await recursiveFindFolder(page, teamPath, finalProductFolder, 3);
     if (matches.length !== 1) {
-      fail(`Could not find remote product folder: ${finalProductFolder}\nThis script does not create team/domestic/product folders automatically; confirm the mapping first.\nAvailable under ${DEFAULT_DOMESTIC}:\n${domesticChildren.map((item) => `  ${item.name}`).join("\n")}`);
+      fail(`Could not find remote product folder: ${finalProductFolder}\nThis script does not create team/root/product folders automatically; confirm the mapping first.\nAvailable under ${finalRootFolder}:\n${releaseRootChildren.map((item) => `  ${item.name}`).join("\n")}`);
     }
     product = matches[0];
   } else {
-    product.path = `${domesticPath}/${product.name}`;
+    product.path = `${releaseRootPath}/${product.name}`;
   }
 
   const productPath = product.path;
@@ -526,7 +550,7 @@ async function resolveRemoteTarget(page, { productFolder, releaseTime, deviceVer
 
   return {
     teamPath,
-    domesticPath,
+    releaseRootPath,
     productPath,
     productFolder: product.name,
     releasePath: release.path,
@@ -663,6 +687,7 @@ async function main() {
   try {
     await login(page, credentials);
     const remote = await resolveRemoteTarget(page, {
+      rootFolder: args.remoteRootFolder,
       productFolder: mapping.folder,
       releaseTime,
       deviceVer,

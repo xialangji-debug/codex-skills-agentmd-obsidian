@@ -1,0 +1,4 @@
+interface:
+  display_name: "ASR3601 Protocol Matrix"
+  short_description: "Check protocol paths and branch support"
+  default_prompt: "Use $asr3601-protocol-branch-matrix to check whether this report matches APP/XCX/YL/AKQ protocol behavior and current branch support."

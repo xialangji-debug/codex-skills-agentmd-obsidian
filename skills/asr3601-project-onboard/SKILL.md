@@ -1,0 +1,61 @@
+---
+name: asr3601-project-onboard
+description: Initialize or refresh local project context for ASR3601/ASR3602/360x/Crane/LVGL firmware repositories. Use when the user asks 初始化当前 360x 项目上下文, 生成项目 AGENTS, 新项目接入 Codex, 当前工程怎么配置, 记录这个项目编译命令, project onboarding, or when a new firmware checkout needs project-level AGENTS.md, .codex-project index/build/zentao/protocol files, and local git exclude entries.
+---
+
+# ASR3601 Project Onboard
+
+Use this skill to create lightweight project-local context for one firmware checkout. It keeps global skills shared while isolating per-project protocol, Zentao, and build rules.
+
+## Workflow
+
+1. Inspect the target repo:
+
+```powershell
+git status --short
+git branch --show-current
+git rev-parse --short HEAD
+```
+
+2. Read `gui\lv_watch\lv_apps\yl\yl.h` when present and extract `yl_device_name`, `yl_device_ver`, and `yl_hw_ver`.
+3. Match the branch and version against:
+
+```text
+C:\Users\84365\.codex\skills\zentao-bug-triage\references\project-map.md
+```
+
+4. Generate or refresh:
+
+```text
+AGENTS.md
+.codex-project\index.md
+.codex-project\zentao.md
+.codex-project\build.md
+.codex-project\protocol.md
+```
+
+5. Add these local context files to `.git\info\exclude` so they do not pollute source commits.
+
+## Script
+
+Use the bundled script for deterministic generation:
+
+```powershell
+python "$env:USERPROFILE\.codex\skills\asr3601-project-onboard\scripts\project_onboard.py" --repo . --write
+```
+
+Useful options:
+
+```powershell
+python "$env:USERPROFILE\.codex\skills\asr3601-project-onboard\scripts\project_onboard.py" --repo C:\Users\84365\Desktop\inside\lt52_XCX_GB --dry-run
+python "$env:USERPROFILE\.codex\skills\asr3601-project-onboard\scripts\project_onboard.py" --repo . --write --force
+python "$env:USERPROFILE\.codex\skills\asr3601-project-onboard\scripts\project_onboard.py" --repo . --write --no-exclude
+```
+
+## Defaults
+
+- Confirmed `project-map.md` entries can be written automatically.
+- Unmatched or unconfirmed project mappings must be marked as needing user confirmation; do not guess a Zentao project ID.
+- Protocol categories are only `电信乐智协议`, `小程序协议`, and `APP协议`: branches or version tokens containing 乐智/电信/LZ use 电信乐智协议; explicit APP uses APP协议; otherwise default to 小程序协议. Treat 物卡/公版/客户名 as product variants, not separate protocol categories.
+- Build commands may be generated from confirmed project notes or local repository evidence. If uncertain, write the safest known candidate and mark it as "needs confirmation".
+- Do not copy global skills into the project. Project files should point back to the global skill path.

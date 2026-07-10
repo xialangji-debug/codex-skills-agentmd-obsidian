@@ -2,6 +2,7 @@
 
 Use this file to map local firmware branches and version tokens to Zentao product/project names. Prefer exact confirmed mappings. If only an unconfirmed candidate matches, ask the user before fetching project-specific bugs.
 When a Zentao project ID is known, add `project_id` so the fetch script can avoid fragile project-name discovery.
+When a Zentao product ID is known from a `bug-browse-<id>` URL, add `product_id`; do not store product IDs as `project_id`.
 
 ## Confirmed Exact Branch Mappings
 
@@ -9,13 +10,35 @@ These entries can be used automatically when the current branch name or `yl_devi
 
 ```yaml
 - branch_contains:
+    - TW38_LT49_3603主板20260601
+  yl_device_ver_contains:
+    - LT49_ZX_ASR3603_TW38
+  zentao_names:
+    - TW38-阿科奇-LT49（越南）
+  verified: 2026-07-10
+  note: User screenshot and bug details 2936/2935/2934/2932/2931/2930/2913/2868/2867/2866/2861/2850/2848 confirmed the product mapping; project id not live-verified yet.
+
+- branch_contains:
+    - TW18_LT52_3602_APP公版腕表20260707
+  yl_device_ver_contains:
+    - LT52_ZX_ASR3602_TW18
+  zentao_names:
+    - TW18_阿科奇_LT52_APP公版
+    - TW18_阿科奇_LT52_APP
+  project_id: 90
+  product_id: 42
+  verified: 2026-07-07
+  note: User screenshot-confirmed product mapping; project id live-verified from `project-index-90.html`; product URL `bug-browse-42-all-.html`.
+
+- branch_contains:
     - TW18_LT52_3602_电信乐智协议腕表20260610
   yl_device_ver_contains:
     - LT52_LZ_ASR3602_TW18
   zentao_names:
     - TW18_阿科奇_LT52_乐智
-  verified: 2026-07-02
-  note: Current c10lezhi family; exact branch/version match.
+  project_id: 164
+  verified: 2026-07-07
+  note: Current c10lezhi family; exact branch/version match; project id live-verified.
 
 - branch_contains:
     - TW10_3602_有屏电信乐智协议20260523
@@ -23,8 +46,9 @@ These entries can be used automatically when the current branch name or `yl_devi
     - C10_LZ_ASR3602_TW10
   zentao_names:
     - TW10_阿科奇_C10_九学王乐智
-  verified: 2026-07-02
-  note: User-confirmed mapping; branch name omits 九学王 but folder/project uses 九学王乐智.
+  project_id: 162
+  verified: 2026-07-07
+  note: User-confirmed mapping; branch name omits 九学王 but folder/project uses 九学王乐智; project id live-verified.
 
 - branch_contains:
     - TW10_C10_3602_定乾有屏小程序20260528
@@ -32,15 +56,18 @@ These entries can be used automatically when the current branch name or `yl_devi
     - C10_DQ_ASR3602_TW10
   zentao_names:
     - TW18_阿科奇_C10_定乾太阳树小程序
-  verified: 2026-07-02
-  note: User-confirmed mapping; project name uses TW18+C10 while branch uses TW10_C10.
+  project_id: 173
+  verified: 2026-07-07
+  note: User-confirmed mapping; project name uses TW18+C10 while branch uses TW10_C10; project id live-verified.
 
 - branch_contains:
     - TW10_C10_3602_光启象限有屏小程序20260624
   zentao_names:
     - TW10_阿科奇_C10_光启象限
-  verified: 2026-07-02
-  note: Screenshot-confirmed mapping.
+  product_id: 140
+  project_id: 202
+  verified: 2026-07-07
+  note: Screenshot-confirmed mapping; product id and project id verified from bug detail pages 3019/3014/2990.
 
 - branch_contains:
     - TW10_C10_3602_有屏小程序协议20260325
@@ -59,42 +86,66 @@ These entries can be used automatically when the current branch name or `yl_devi
   zentao_names:
     - TW18_阿科奇_JC2_儿童陪伴机_小程序公版
   verified: 2026-07-02
-  note: Screenshot-confirmed mapping.
+  note: Screenshot-confirmed mapping; exact Zentao id not live-verified yet.
 
 - branch_contains:
     - TW18_JC8_3602九颗桃老人腕表20260422
   zentao_names:
     - TW18_阿科奇_JC8_九颗桃
-  verified: 2026-07-02
-  note: Screenshot-confirmed mapping.
+  project_id: 161
+  verified: 2026-07-07
+  note: Screenshot-confirmed mapping; project id live-verified.
 
 - branch_contains:
     - TW18_JC8_3602小程序儿童版20260610
   zentao_names:
     - TW18_阿科奇_JC8_小程序儿童款公版
-  verified: 2026-07-02
-  note: Screenshot-confirmed mapping.
+  project_id: 130
+  verified: 2026-07-07
+  note: Screenshot-confirmed mapping; project id live-verified.
 
 - branch_contains:
     - TW18_JC8_3602_XD_小程序儿童版20260702
   zentao_names:
+    - TW18-阿科奇-JC8-熊顿儿童款
     - TW18_阿科奇_JC8_熊顿小程序儿童款
-  verified: 2026-07-02
-  note: Screenshot-confirmed mapping; XD is treated as 熊顿.
+  product_id: 131
+  project_id: 190
+  verified: 2026-07-07
+  note: Screenshot-confirmed mapping; XD is treated as 熊顿; Zentao detail page product text uses hyphens and omits 小程序.
 
 - branch_contains:
     - TW18_JC8_3602老人版公版
   zentao_names:
     - TW18_阿科奇_JC8_APP老人款公版
-  verified: 2026-07-02
-  note: Screenshot-confirmed mapping.
+  project_id: 160
+  verified: 2026-07-07
+  note: Screenshot-confirmed mapping; project id live-verified.
 
 - branch_contains:
     - TW18_LT52_3602_小程序公版物卡协议腕表20260410
   zentao_names:
     - TW18_阿科奇_LT52_小程序物卡公版
-  verified: 2026-07-02
-  note: Screenshot-confirmed mapping.
+  project_id: 166
+  verified: 2026-07-07
+  note: Screenshot-confirmed mapping; project id live-verified.
+
+- branch_contains:
+    - TW18_LT52_3602_小程序协议腕表20251218
+  zentao_names:
+    - TW18_阿科奇_LT52_小程序公版
+  project_id: 119
+  product_id: 66
+  verified: 2026-07-07
+  note: Project id live-verified from `project-index-119.html`; product id live-verified from `product-browse-66.html`.
+
+- branch_contains:
+    - TW18_LT52_3602_小程序协议创维版腕表20260318
+  zentao_names:
+    - TW18_阿科奇_LT52_创维物卡小程序
+  project_id: 132
+  verified: 2026-07-07
+  note: Project id live-verified from `project-index-132.html`; previous unconfirmed candidate `TW18_阿科奇_LT52_创维小程序` was incomplete.
 ```
 
 ## Generic Confirmed Families
@@ -111,6 +162,7 @@ Use these only when an exact branch mapping above does not match. If more than o
     - 电信乐智
   zentao_names:
     - TW18_阿科奇_LT52_乐智
+  project_id: 164
   note: Prefer exact current-family match for branches like TW18_LT52_3602_电信乐智协议腕表 and versions like LT52_LZ_ASR3602_TW18.
 
 - local_tokens:
@@ -123,11 +175,23 @@ Use these only when an exact branch mapping above does not match. If more than o
   note: Ask if branch does not include 物卡, 创维, i武当, or other customer marker.
 
 - local_tokens:
+    - TW18
+    - LT52
+    - APP
+    - 公版
+    - ZX
+  zentao_names:
+    - TW18_阿科奇_LT52_APP
+  product_id: 42
+  note: Generic LT52 APP public family. Local branch may contain APP公版, while the confirmed Zentao project name is TW18_阿科奇_LT52_APP.
+
+- local_tokens:
     - TW10
     - C10
     - 小程序
   zentao_names:
     - TW10_阿科奇_C10_小程序公版
+  project_id: 134
   note: Generic TW10/C10 mini-program public family.
 
 - local_tokens:
@@ -137,6 +201,7 @@ Use these only when an exact branch mapping above does not match. If more than o
     - 儿童
   zentao_names:
     - TW18_阿科奇_JC8_小程序儿童款公版
+  project_id: 130
   note: Generic JC8 child mini-program family.
 
 - local_tokens:
@@ -145,6 +210,7 @@ Use these only when an exact branch mapping above does not match. If more than o
     - 老人
   zentao_names:
     - TW18_阿科奇_JC8_APP老人款公版
+  project_id: 160
   note: Generic JC8 elder APP family.
 
 - local_tokens:
@@ -216,14 +282,6 @@ These branch names are visible in the current repo, but the exact Zentao product
 
 - branch_contains: TW18_LT52_3602_小程序协议i武当腕表20260202
   candidate: TW18_阿科奇_LT52_i武当小程序
-  status: unconfirmed
-
-- branch_contains: TW18_LT52_3602_小程序协议创维版腕表20260318
-  candidate: TW18_阿科奇_LT52_创维小程序
-  status: unconfirmed
-
-- branch_contains: TW18_LT52_3602_小程序协议腕表20251218
-  candidate: TW18_阿科奇_LT52_小程序
   status: unconfirmed
 
 - branch_contains: TW18_LT55_3602带心率腕表固件20260203

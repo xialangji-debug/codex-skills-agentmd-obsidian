@@ -111,6 +111,58 @@ function Get-GitStatusLines {
   return @($text -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 }
 
+function Convert-CodePointsToString {
+  param([int[]]$CodePoints)
+  $builder = New-Object System.Text.StringBuilder
+  foreach ($codePoint in $CodePoints) {
+    [void]$builder.Append([char]$codePoint)
+  }
+  return $builder.ToString()
+}
+
+function Get-ZhReleaseText {
+  param([string]$Key)
+  switch ($Key) {
+    "VersionFixRecord" { return Convert-CodePointsToString @(0x7248, 0x672C, 0x4FEE, 0x590D, 0x8BB0, 0x5F55) }
+    "VersionTime" { return Convert-CodePointsToString @(0x7248, 0x672C, 0x65F6, 0x95F4, 0xFF1A) }
+    "VersionNumber" { return Convert-CodePointsToString @(0x7248, 0x672C, 0x53F7, 0xFF1A) }
+    "Branch" { return Convert-CodePointsToString @(0x5206, 0x652F, 0xFF1A) }
+    "ReleaseCommit" { return Convert-CodePointsToString @(0x53D1, 0x7248, 0x63D0, 0x4EA4, 0xFF1A) }
+    "ReadmeLatest" { return "README " + (Convert-CodePointsToString @(0x6700, 0x65B0, 0x8BB0, 0x5F55, 0xFF1A)) }
+    "RecentCommits" { return Convert-CodePointsToString @(0x6700, 0x8FD1, 0x63D0, 0x4EA4, 0xFF1A) }
+    "Unavailable" { return Convert-CodePointsToString @(0x4E0D, 0x53EF, 0x7528) }
+    "MiniProgram" { return Convert-CodePointsToString @(0x5C0F, 0x7A0B, 0x5E8F) }
+    "IotCard" { return Convert-CodePointsToString @(0x7269, 0x5361) }
+    "Public" { return Convert-CodePointsToString @(0x516C, 0x7248) }
+    "MiniProgramIotPublic" { return Convert-CodePointsToString @(0x5C0F, 0x7A0B, 0x5E8F, 0x7269, 0x5361, 0x516C, 0x7248) }
+    "MiniProgramPublic" { return Convert-CodePointsToString @(0x5C0F, 0x7A0B, 0x5E8F, 0x516C, 0x7248) }
+    default { throw "Unknown zh release text key: $Key" }
+  }
+}
+
+function Read-TextFile {
+  param([string]$PathValue)
+  $bytes = [System.IO.File]::ReadAllBytes($PathValue)
+  if ($bytes.Length -eq 0) {
+    return ""
+  }
+  $utf8Strict = New-Object System.Text.UTF8Encoding -ArgumentList $false, $true
+  try {
+    return $utf8Strict.GetString($bytes)
+  } catch {
+    return [System.Text.Encoding]::Default.GetString($bytes)
+  }
+}
+
+function Write-Utf8BomTextFile {
+  param(
+    [string]$PathValue,
+    [string]$Content
+  )
+  $utf8Bom = New-Object System.Text.UTF8Encoding -ArgumentList $true
+  [System.IO.File]::WriteAllText($PathValue, $Content, $utf8Bom)
+}
+
 function Test-IsSourceLikePath {
   param([string]$PathValue)
   $normalized = $PathValue -replace '\\', '/'
@@ -170,12 +222,56 @@ function Get-TopReadmeSection {
   if (-not (Test-Path -LiteralPath $readmePath -PathType Leaf)) {
     return ""
   }
-  $text = Get-Content -LiteralPath $readmePath -Raw
+  $text = Read-TextFile -PathValue $readmePath
   $matches = [regex]::Matches($text, "(?ms)^##\s+.*?(?=^##\s+|\z)")
   if ($matches.Count -lt 1) {
     return ""
   }
   return $matches[0].Value.Trim()
+}
+
+function Get-ReleaseReadmeTitle {
+  param(
+    [string]$DeviceVer,
+    [string]$Branch,
+    [string]$RemoteProductFolder
+  )
+  $model = ""
+  if (-not [string]::IsNullOrWhiteSpace($DeviceVer)) {
+    $model = @($DeviceVer -split "_")[0]
+  }
+  if ([string]::IsNullOrWhiteSpace($model)) {
+    $model = "Firmware"
+  }
+
+  $profile = ""
+  if (-not [string]::IsNullOrWhiteSpace($RemoteProductFolder)) {
+    $parts = @($RemoteProductFolder -split "_" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $modelIndex = [Array]::IndexOf($parts, $model)
+    if ($modelIndex -ge 0 -and $modelIndex -lt ($parts.Count - 1)) {
+      $profile = (@($parts[($modelIndex + 1)..($parts.Count - 1)]) -join "")
+    } elseif ($parts.Count -gt 0) {
+      $profile = $parts[$parts.Count - 1]
+    }
+  }
+
+  if ([string]::IsNullOrWhiteSpace($profile) -and -not [string]::IsNullOrWhiteSpace($Branch)) {
+    $miniProgram = Get-ZhReleaseText "MiniProgram"
+    $iotCard = Get-ZhReleaseText "IotCard"
+    $public = Get-ZhReleaseText "Public"
+    if ($Branch.Contains($miniProgram) -and $Branch.Contains($iotCard) -and $Branch.Contains($public)) {
+      $profile = Get-ZhReleaseText "MiniProgramIotPublic"
+    } elseif ($Branch.Contains($miniProgram) -and $Branch.Contains($public)) {
+      $profile = Get-ZhReleaseText "MiniProgramPublic"
+    } elseif ($Branch.Contains("APP") -and $Branch.Contains($public)) {
+      $profile = "APP" + $public
+    }
+  }
+
+  if ([string]::IsNullOrWhiteSpace($profile)) {
+    return "$model $(Get-ZhReleaseText "VersionFixRecord")"
+  }
+  return "$model $profile$(Get-ZhReleaseText "VersionFixRecord")"
 }
 
 function New-DefaultReleaseReadme {
@@ -185,26 +281,27 @@ function New-DefaultReleaseReadme {
     [string]$ReleaseTimeValue,
     [string]$DeviceVer,
     [string]$Branch,
-    [string]$Commit
+    [string]$Commit,
+    [string]$RemoteProductFolder
   )
   $section = Get-TopReadmeSection -RepoPath $RepoPath
   $commitLines = Get-GitText -RepoPath $RepoPath -Arguments @("log", "--oneline", "-5")
   $content = @()
-  $content += "TW10 C10 版本修复记录"
+  $content += Get-ReleaseReadmeTitle -DeviceVer $DeviceVer -Branch $Branch -RemoteProductFolder $RemoteProductFolder
   $content += ""
-  $content += "版本时间：$ReleaseTimeValue"
-  $content += "版本号：$DeviceVer"
-  $content += "分支：$Branch"
-  $content += "发版提交：$Commit"
+  $content += "$(Get-ZhReleaseText "VersionTime")$ReleaseTimeValue"
+  $content += "$(Get-ZhReleaseText "VersionNumber")$DeviceVer"
+  $content += "$(Get-ZhReleaseText "Branch")$Branch"
+  $content += "$(Get-ZhReleaseText "ReleaseCommit")$Commit"
   $content += ""
   if (-not [string]::IsNullOrWhiteSpace($section)) {
-    $content += "README 最新记录："
+    $content += Get-ZhReleaseText "ReadmeLatest"
     $content += Convert-MarkdownReleaseNotesToPlainText -Markdown $section
     $content += ""
   }
-  $content += "最近提交："
+  $content += Get-ZhReleaseText "RecentCommits"
   if ([string]::IsNullOrWhiteSpace($commitLines)) {
-    $content += "(不可用)"
+    $content += "(" + (Get-ZhReleaseText "Unavailable") + ")"
   } else {
     $content += @($commitLines -split "`r?`n")
   }
@@ -213,7 +310,7 @@ function New-DefaultReleaseReadme {
   if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
     New-Item -ItemType Directory -Path $dir | Out-Null
   }
-  ($content -join "`r`n") | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+  Write-Utf8BomTextFile -PathValue $OutputPath -Content ($content -join "`r`n")
   Write-Host "Generated release readme: $OutputPath"
 }
 
@@ -364,6 +461,12 @@ $PrepareScript = Join-Path $SkillDir "scripts\prepare_release_package.py"
 $UploadScript = Join-Path $SkillDir "scripts\fnos_upload_release.js"
 $BundledNode = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
 $BundledNodePath = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules"
+$BundledPnpmNodePath = Join-Path $BundledNodePath ".pnpm\node_modules"
+$BundledNodePathEntries = @($BundledNodePath)
+if (Test-Path -LiteralPath $BundledPnpmNodePath -PathType Container) {
+  $BundledNodePathEntries += $BundledPnpmNodePath
+}
+$BundledNodePathValue = $BundledNodePathEntries -join [System.IO.Path]::PathSeparator
 $Node = if (Test-Path -LiteralPath $BundledNode -PathType Leaf) { $BundledNode } else { "node" }
 $Python = "python"
 
@@ -430,7 +533,7 @@ if ($Headed) {
 
 if (-not $NoPreflight -and -not $StateSaysUploaded -and -not $TrustExistingPackage) {
   $preflightArgs = @($UploadBaseArgs + "--preflight")
-  Invoke-Checked -Command $Node -Arguments $preflightArgs -WorkingDirectory $RepoPath -Environment @{ NODE_PATH = $BundledNodePath }
+  Invoke-Checked -Command $Node -Arguments $preflightArgs -WorkingDirectory $RepoPath -Environment @{ NODE_PATH = $BundledNodePathValue }
 } elseif ($StateSaysUploaded) {
   Write-Host "resume: previous state says upload already succeeded; final upload step will verify identical remote files."
 } elseif ($TrustExistingPackage) {
@@ -506,7 +609,7 @@ if ($packageStateOk -and -not $ForceCleanBuild) {
 }
 
 if ($IncludeReadme -and [string]::IsNullOrWhiteSpace($Readme)) {
-  New-DefaultReleaseReadme -RepoPath $RepoPath -OutputPath $ExpectedReadme -ReleaseTimeValue $ReleaseTime -DeviceVer $IntendedDeviceVer -Branch $Branch -Commit $Commit
+  New-DefaultReleaseReadme -RepoPath $RepoPath -OutputPath $ExpectedReadme -ReleaseTimeValue $ReleaseTime -DeviceVer $IntendedDeviceVer -Branch $Branch -Commit $Commit -RemoteProductFolder $RemoteProductFolder
 }
 
 if ($NoUpload) {
@@ -518,7 +621,7 @@ $uploadArgs = @($UploadBaseArgs + "--allow-existing-identical")
 if ($ReplaceExisting) {
   $uploadArgs += "--replace-existing"
 }
-Invoke-Checked -Command $Node -Arguments $uploadArgs -WorkingDirectory $RepoPath -Environment @{ NODE_PATH = $BundledNodePath }
+Invoke-Checked -Command $Node -Arguments $uploadArgs -WorkingDirectory $RepoPath -Environment @{ NODE_PATH = $BundledNodePathValue }
 
 $stateFiles = @($ExpectedZip, $ExpectedMdb)
 if ($IncludeReadme) { $stateFiles += $ExpectedReadme }
