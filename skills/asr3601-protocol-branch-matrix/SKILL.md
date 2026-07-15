@@ -66,6 +66,8 @@ git branch --show-current
 git rev-parse --short HEAD
 ```
 
+   Read `.codex-project/variant.md` first when present. Confirm repo, branch, commit, `yl_device_ver`, chip, OS, protocol, customer/product variant, build parameters, and Zentao mapping. If the fingerprint disagrees with current Git or `yl.h`, refresh it with `asr3601-project-onboard` and do not reuse the stale protocol conclusion.
+
 4. Search firmware code by stable clues from the protocol, not by broad guesses:
    - APP/XCX/YL/AKQ keywords
    - report/event/function names

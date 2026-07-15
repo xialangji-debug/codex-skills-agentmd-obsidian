@@ -20,7 +20,8 @@ Use this skill for a local build/flash loop only. It compiles the current firmwa
 
 1. Identify context:
    - Confirm the repo root, branch, short commit, and dirty status.
-   - Read the current project's `AGENTS.md` and `.codex-project\build.md` when present.
+   - Read the current project's `AGENTS.md`, `.codex-project\variant.md`, and `.codex-project\build.md` when present.
+   - Confirm the variant fingerprint: `yl_device_ver`, chip, OS, protocol, customer/product variant, build parameters, and Zentao mapping. Refresh it with `asr3601-project-onboard` if it is missing or stale.
    - Identify the product/protocol variant only as context; do not switch projects or Zentao mappings here.
 
 2. Confirm the build command:

@@ -1,6 +1,6 @@
 ---
 name: asr3601-fix-closeout-reporter
-description: Close out ASR3601/ASR3602/Crane SDK/LVGL children-watch firmware fixes after code changes or triage decisions are complete. Use when the user asks “修复完了吗”, “改了什么”, “怎么验证”, “收工更新”, “这个怎么写解决说明”, “禅道标记解决”, or needs a Chinese delivery report that summarizes problem, root cause, modified behavior/files, verification, risks, missing coverage, Obsidian fix-pattern need, and Zentao-ready resolution notes. Use asr3601-fix-verifier for verification checks, obsidian-fix-pattern-memory for reusable memory writes, and zentao-bug-resolver only after the user explicitly wants to mark selected Zentao bugs resolved.
+description: Close out ASR3601/ASR3602/Crane SDK/LVGL children-watch firmware fixes after code changes or triage decisions are complete, or aggregate explicit validation debt across Obsidian fix-pattern notes. Use when the user asks “修复完了吗”, “改了什么”, “怎么验证”, “收工更新”, “这个怎么写解决说明”, “禅道标记解决”, “还有哪些没验证”, “待真机”, “验证债务”, “待回归”, or “发布前验收清单”. Produce a Chinese delivery report with variant fingerprint, verification layers, risks, missing coverage, memory decision, and Zentao-ready notes. Use asr3601-fix-verifier for verification checks, obsidian-fix-pattern-memory for reusable memory writes, asr3601-project-onboard for missing/stale project fingerprints, and zentao-bug-resolver only after the user explicitly wants to mark selected Zentao bugs resolved.
 ---
 
 # ASR3601 Fix Closeout Reporter
@@ -12,6 +12,7 @@ Use this skill after a fix, port, or completed triage decision. Its job is to tu
 - Use `asr3601-bug-intake-orchestrator` or `asr3601-lvgl-firmware-triage` when the bug has not been investigated or fixed yet.
 - Use `asr3601-cross-branch-porting` when the remaining work is source-target migration.
 - Use `asr3601-fix-verifier` for raw verification checks; this skill consumes those checks and writes the final report.
+- Use `asr3601-project-onboard` before closeout when `.codex-project/variant.md` is missing or no longer matches the live checkout.
 - Use `obsidian-fix-pattern-memory` only when the fix is reusable across branches, versions, or similar projects.
 - Use `zentao-bug-resolver` only when the user explicitly asks to submit or mark selected Zentao bugs resolved. Otherwise, produce a preview/草稿 only.
 - Zentao development closeout stops at resolving the bug: set the bug to `已解决` with resolution `已解决` and a Chinese note.
@@ -21,14 +22,17 @@ Never revert unrelated local changes. If the worktree is dirty, distinguish know
 
 ## Closeout Workflow
 
-1. Confirm context:
-   - project path
+1. Load the canonical project fingerprint from `<repo>/.codex-project/variant.md`.
+   - Require: repo, branch, commit, dirty worktree, `yl_device_ver`, CHIP_ID, TARGET_OS, PS_MODE, protocol, customer/product variant, build command, and Zentao project/mapping.
+   - Compare repo, branch, commit, dirty worktree, and `yl_device_ver` with the live checkout.
+   - If the file is missing, required fields are absent, or live values differ, enter `asr3601-project-onboard`, refresh the fingerprint, then reread it before verification or reporting.
+   - Do not reuse build, protocol, customer, or Zentao assumptions from a stale fingerprint.
+2. Confirm context:
    - bug ID/title if present
-   - current branch and short commit
-   - dirty worktree
+   - canonical variant fields: repo, branch, commit, dirty, `yl_device_ver`, chip, OS, PS_MODE, protocol, customer, build, and Zentao mapping
    - target product/variant: standard watch, sport watch, phone, simulator, C10 乐智, C10 公版, 360x, LT52, AKQ, or unknown
-   - user goal: report only, verify, memory update, Zentao resolution draft, or actual Zentao submit
-2. Run non-destructive checks:
+   - user goal: report only, verify, aggregate validation debt, memory update, Zentao resolution draft, or actual Zentao submit
+3. Run non-destructive checks:
    - `git status --short`
    - `git branch --show-current`
    - `git rev-parse --short HEAD`
@@ -37,7 +41,7 @@ Never revert unrelated local changes. If the worktree is dirty, distinguish know
    - `git diff --check`
    - targeted `rg` checks for changed symbols, UI text, protocol fields, resource IDs, or guard conditions
    - the narrowest known build or syntax check
-3. Prefer the helper script for a compact snapshot:
+4. Prefer the helper script for a compact snapshot:
 
 ```powershell
 python C:\Users\84365\.codex\skills\asr3601-fix-closeout-reporter\scripts\closeout_snapshot.py `
@@ -46,11 +50,11 @@ python C:\Users\84365\.codex\skills\asr3601-fix-closeout-reporter\scripts\closeo
   --build-command "ninja -C out/product/craneg_modem_watch lv_watch"
 ```
 
-4. If a deeper verification run is needed, use `asr3601-fix-verifier` and include its result in the final closeout.
-5. Decide memory:
+5. If a deeper verification run is needed, use `asr3601-fix-verifier` and include its result in the final closeout.
+6. Decide memory:
    - Write/update `Codex\fix-patterns\` through `obsidian-fix-pattern-memory` when the fix is a reusable pattern, regression, cross-branch port, protocol mismatch, or hard-won project lesson.
    - Do not write memory for one-off wording, temporary local setup, unsupported experiments, or fixes without verified reusable value.
-6. Prepare Zentao wording:
+7. Prepare Zentao wording:
    - For code-fixed bugs, choose `已解决/fixed` and write a concise resolution note only if useful.
    - For platform/backend/app/test-environment issues, choose `外部原因/external` and include the evidence.
    - Do not submit to Zentao unless the user explicitly asks or approves the preview.
@@ -58,11 +62,36 @@ python C:\Users\84365\.codex\skills\asr3601-fix-closeout-reporter\scripts\closeo
    - For selected bugs that should be submitted in Zentao, enter `zentao-bug-resolver` and use the current branch as `resolvedBuild` for current APP协议/branch fixes.
    - If a fixed bug was mistakenly closed, use the resolver's `--activate-closed` flow: reactivate first, then resolve as `已解决`; never click `关闭` from development.
 
+## Validation Debt Mode
+
+When the user asks “还有哪些没验证”, “待真机”, “验证债务”, “待回归”, or “发布前验收清单”, run:
+
+```powershell
+python C:\Users\84365\.codex\skills\asr3601-fix-closeout-reporter\scripts\validation_debt_report.py `
+  --fix-patterns C:\Users\84365\Documents\Obsidian\CodexVault\Codex\fix-patterns
+```
+
+- Keep the default run read-only.
+- Treat only the last explicit `验证状态` or `验证结论` field in each note as authoritative. Do not reopen a closed item because its body contains historical “待真机” instructions.
+- Report project, branch, commit, passed verification gates, remaining work, priority, next action, and source note.
+- Keep verification layers distinct: static/object checks, full build/package, release, device regression, and platform/protocol logs.
+- Never upgrade a note to “已验证”, resolve/close Zentao, or infer QA completion from a build pass.
+- To create a standalone draft for human review, pass `--open-loops-draft <output.md>`. This writes only the requested draft and does not edit `open-loops.md`.
+- After reviewing current evidence, manually sync only explicit live debts into `Codex/agent/open-loops.md`; remove or mark items complete when their authoritative status becomes verified.
+
 ## Required Report Shape
 
 Write concise Chinese. Include these fields unless irrelevant:
 
 ```text
+变体指纹：
+  repo：
+  branch / commit / dirty：
+  yl_device_ver：
+  CHIP_ID / TARGET_OS / PS_MODE：
+  协议 / 客户产品：
+  构建命令：
+  禅道映射：
 问题：
 根因：
 修改：
@@ -115,4 +144,6 @@ node "$env:USERPROFILE\.codex\skills\zentao-bug-resolver\scripts\zentao_bug_reso
 
 ## Helper Script
 
-`scripts/closeout_snapshot.py` prints a Markdown snapshot with Git state, changed files, diff check, optional searches, optional build output, and a report template. It is read-only except for build commands passed by the caller.
+`scripts/closeout_snapshot.py` prints a Markdown snapshot with canonical variant context, live Git state, changed files, diff check, optional searches, optional build output, and a report template. It is read-only except for build commands passed by the caller.
+
+`scripts/validation_debt_report.py` scans explicit verification-state fields in `Codex/fix-patterns`, excludes closed history, and prints a prioritized Markdown debt report. It is read-only unless `--open-loops-draft` is explicitly supplied.

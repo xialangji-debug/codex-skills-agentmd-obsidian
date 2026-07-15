@@ -26,6 +26,8 @@ Infer these from the user, workspace, git state, attached files, or memory befor
 验证方式：
 ```
 
+Capture a full variant fingerprint for both source and target before comparison: repo, branch, commit, dirty state, `yl_device_ver`, chip, OS, protocol, customer/product variant, build parameters, and Zentao mapping. Prefer each repo's `.codex-project/variant.md`; refresh it through `asr3601-project-onboard` when missing or stale. A customer/product name is not a protocol category.
+
 Ask only when the source or target cannot be inferred safely. Common roots include `D:\XM\360x_202403r1`, `D:\XM\crane-2024.03_r4`, and temporary desktop/export folders.
 
 ## Memory Lookup
@@ -76,6 +78,8 @@ Before editing, produce or internally confirm:
 ```text
 当前分支/提交：
 dirty worktree：
+源变体指纹：
+目标变体指纹：
 源提交是否已合入：
 源改动文件：
 目标对应文件：

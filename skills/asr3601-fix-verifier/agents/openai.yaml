@@ -1,4 +1,4 @@
 interface:
-  display_name: "ASR3601 Fix Verifier"
-  short_description: "Verify ASR3601 firmware fixes cleanly"
-  default_prompt: "Use $asr3601-fix-verifier to verify this ASR3601 firmware fix before reporting."
+  display_name: "ASR360x 修复验证"
+  short_description: "校验变体指纹、代码构建、分支边界与多语言长文本风险"
+  default_prompt: "Use $asr3601-fix-verifier to verify this ASR360x firmware fix, including its variant fingerprint and LVGL localization risks."

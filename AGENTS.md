@@ -1,120 +1,74 @@
-# Codex Markdown Memory Instructions
+# Codex Global Instructions
 
-这个配置让 Codex 使用本地 Obsidian Markdown 文件作为长期项目记忆。
+## Language
 
-默认路径建议：
+Always respond in Simplified Chinese unless the user explicitly requests another language. Code, commands, paths, logs, and technical terms may remain in English.
 
-- Obsidian vault: `<你的 Obsidian vault>`
-- Memory root: `<你的 Obsidian vault>/Codex`
+## Durable Memory
 
-不要使用 Basic Memory MCP。默认直接读写本地 Markdown 文件。
+Use local Markdown in the user's Obsidian vault:
 
-## 使用原则
+- Vault: `<your Obsidian vault>`
+- Memory: `<your Obsidian vault>\Codex`
 
-不要保存完整聊天记录，只保存以后可复用的上下文。
+Never use Basic Memory MCP. Do not save full chat logs, credentials, passwords, API keys, tokens, or other sensitive data.
 
-优先记录：
+Default behavior:
 
-- 项目背景
-- 人员信息
-- 重要决策
-- 待跟进事项
-- 项目状态
-- 重复性工作流
-- 跨分支可复用修复模式
-- 可复用经验
-- 下次继续工作所需的上下文
+- Prefer the current conversation and workspace files.
+- Do not scan the whole vault or consult memory for ordinary code fixes.
+- When memory is needed, search narrowly and read at most 1-3 relevant notes unless the user asks for a broader review.
+- Search priority: `fix-patterns/`, `projects/`, `people/`, `notes/`, then `agent/`.
 
-## 开始任务时
+Automatically search only `Codex/fix-patterns/` for cross-branch/version work, similar or regression issues, or logs/errors with clear keywords. Use 1-3 terms and stop if no match is found.
 
-默认不要读取整个记忆库。
+Use broader memory when the user says "读取记忆库", "继续上次", "记一下", or "收工更新", or when reliable completion requires cross-session project context.
 
-代码修复任务不要默认使用记忆库；只有出现跨分支、类似问题、回归问题或明确日志关键词时，才自动使用少量相关记忆。
+## Skill And Project Routing
 
-在开始跨分支移植、类似问题排查、回归问题排查，或日志中出现明确可搜索错误关键词时：
+Use `aa-skill-router` first for short workflow requests such as "抓 bug", "当前 bug", "禅道", "修 bug", "协议", "日志", "收工更新", "出版本", "初始化当前 360x 项目上下文", or "skill 整理".
 
-- 先识别项目名、分支、模块、关键错误词、关键文件名
-- 在 `Codex/fix-patterns/` 中搜索 1-3 个最相关的修复模式
-- 如命中，再读取对应模式文件
-- 没命中时不要扩大到整个记忆库
+If a required skill is not exposed but exists locally, read:
 
-其他任务只有在这些情况下才读取记忆库：
+`<CODEX_HOME>\skills\<skill-name>\SKILL.md`
 
-- 用户说“读取记忆库”“继续上次”“记一下”“收工更新”
-- 任务明确依赖项目历史、人员背景、旧决策、待办或跨会话上下文
-- 当前问题无法仅靠工作区文件和当前对话可靠完成
+Use `<CODEX_HOME>\skills-index\index.md` only when routing is unclear or the user asks to organize skills.
 
-使用时先做窄范围文件检索：
+Prefer project-local context when present:
 
-- 优先在 `Codex/projects/`、`Codex/people/`、`Codex/notes/` 中按关键词找文件
-- 代码问题优先在 `Codex/fix-patterns/` 中按关键词找文件
-- 先读具体项目笔记，不读整个目录
-- 只有命中结果确实相关时，才读取全文
-- 避免一次性读取整个记忆库
+- `AGENTS.md`
+- `.codex-project\index.md`
+- `.codex-project\zentao.md`
+- `.codex-project\build.md`
+- `.codex-project\protocol.md`
 
-## 工作过程中
+Keep active skills flat under `<CODEX_HOME>\skills`; archive inactive skills under `<CODEX_HOME>\skills.disabled`.
 
-如果发现有长期价值的信息，应直接更新到对应 Markdown 文件。
+## Zentao Bug Intake
 
-例如：
+In ASR3601/ASR3602/360x/Crane/LVGL firmware workspaces, treat "抓 bug", "当前 bug", "当前分支 bug", "这个分支有哪些 bug", and "看禅道 bug" as Zentao fetch-and-triage requests.
 
-- 项目信息写入 `projects/`
-- 人员信息写入 `people/`
-- 跨分支问题修复模式写入 `fix-patterns/`
-- 待办事项写入 `TODO.md`
-- 未解决问题写入 `agent/open-loops.md`
-- 通用经验写入 `notes/`
+Workflow:
 
-## 跨分支修复模式
+1. Use `zentao-bug-triage`; if unavailable, read its local `SKILL.md` directly.
+2. Identify the current repo, branch, short commit, product/version mapping, then run the snapshot workflow. Do not ask for reproduction steps first.
+3. Return the compact table: `ID | 标题 | 类型 | 处理建议 | 附件 | 我能否先修`.
+4. Use `asr3601-bug-intake-orchestrator` only after a concrete bug ID, detail, screenshot, log, or attachment needs code-level judgment or fixing.
 
-当完成一个可能会在其他分支、其他版本或类似项目中复现的问题时，默认自动记录或更新 `Codex/fix-patterns/`。除非用户明确说“不要记录”“不要更新记忆库”，否则不需要等待用户再次确认。
+## Writing Memory
 
-应记录：
+After a reusable fix that may recur across branches, versions, or similar projects, create or update a note under:
 
-- 问题标题和关键词
-- 适用项目、模块、分支或版本
-- 症状和日志特征
-- 根因
-- 关键文件和函数
-- 修复步骤或补丁思路
-- 验证方法
-- 不适用场景和注意事项
+`<your Obsidian vault>\Codex\fix-patterns`
 
-文件命名建议：
+Skip only when the user says "不要记录" or "不要更新记忆库". Include keywords, applicable project/version, symptoms/log signatures, root cause, key files/functions, fix approach, verification, and cautions.
 
-- `项目-模块-问题关键词.md`
-- 例如：`asr3601-camera-sim-switch-no-sensor.md`
+Write other durable information only when valuable:
 
-如果只是临时修复、一次性试验、未验证猜测，不要写入修复模式；可以写入 `agent/open-loops.md`。
+- Project state: `projects/`
+- People context: `people/`
+- Reusable workflows: `notes/`
+- Pending work: `agent/TODO.md`
+- Unresolved issues: `agent/open-loops.md`
 
-最终回复中应简短说明：
-
-- 是否更新了修复模式
-- 如果更新了，写入了哪个文件
-- 如果没有更新，原因是什么
-
-## 省 Token 规则
-
-- 单次最多读取 1-3 篇笔记
-- 代码修复优先读取具体 `fix-patterns/` 笔记，不读索引文件
-- 搜索无关时停止，不继续扩大范围
-- 不把完整长笔记粘进回复，只总结必要结论
-- 小问题、一次性问题、不涉及跨分支复用价值的信息，不写入记忆库
-
-## 结束任务时
-
-在完成重要任务后，按需检查是否需要更新记忆库。小问题、一次性问题、不涉及长期价值的信息，不写入记忆库。
-
-应记录：
-
-- 本次完成了什么
-- 改了哪些关键文件
-- 做了哪些决策
-- 还剩哪些待办
-- 下次继续时应该从哪里开始
-
-如果更新了记忆库，在回复中说明修改了哪些记忆文件。
-
-## 隐私规则
-
-不要保存密码、密钥、令牌、身份证、银行卡、私人聊天原文等敏感信息。
+At the end of important tasks, briefly state which memory files changed. If no fix-pattern was written, briefly state why. Small one-off tasks do not need memory updates.

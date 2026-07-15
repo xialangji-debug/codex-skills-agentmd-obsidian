@@ -4,7 +4,7 @@
 
 这是一个可移植的 Codex 配置包，包含：
 
-- 一组可直接安装到 Codex 的 `skills/`，当前同步 23 个本机自定义 skill
+- 一组可直接安装到 Codex 的 `skills/`，当前同步 21 个本机自定义 skill
 - 可选 MCP 工具：CATStudio 在线日志准备、AbootDownload 安全烧录辅助、Everything 文件搜索、WeFlow 聊天导出辅助
 - 通用版 `AGENTS.md`，用于约束 Codex 如何按需使用 Obsidian Markdown 记忆库
 - 一个空的 Obsidian 记忆库模板，适合别人从零开始建立项目记忆
@@ -42,15 +42,25 @@
 
 ## 当前同步快照
 
-- 更新时间：2026-07-11
-- Skills：23 个本机自定义 skill，未包含 Codex 内置 `.system` skill
+- 更新时间：2026-07-14
+- Skills：21 个本机自定义 skill，未包含 Codex 内置 `.system` skill
 - MCP：`aboot-download`、`catstudio-online-log`、`everything-search`、`weflow-export`
 - 未发布的本机 MCP：`node_repl` 属于 Codex App 内置运行时，不作为仓库 MCP 分发
+
+### 2026-07-14 更新
+
+- 新增 `asr360x-feature-closure-auditor`，用于检查客户版功能裁剪是否真正闭环，而不只是隐藏菜单。
+- 新增 `skill-usage-tracker`，用于统计 skill 使用情况、审计 active/disabled/plugin 注册状态和失效路由。
+- 保留 `codex-clash-proxy` 和 `codex-ccswitch-mobile`，分别支持命令级 Clash 下载代理和 CC Switch 手机远程配置。
+- 移除当前电脑已不再启用的 `code-review`、`grill-with-docs`、`to-prd`、`hatch-pet`、`playwright`。
+- 扩展修复收尾和验证流程，加入验证债务汇总、变体指纹、LVGL 多语言/长文本预检。
+- 更新项目接入、Bug 分流、跨分支移植、协议矩阵、固件构建发布和禅道抓取规则。
+- 更新通用 `AGENTS.md`，补充简体中文、skill/project 路由、禅道 Bug 获取和记忆写入规则。
 
 <details>
 <summary>已同步 skills</summary>
 
-`aa-skill-router`, `akq-firmware-release`, `asr3601-bug-intake-orchestrator`, `asr3601-cross-branch-porting`, `asr3601-fix-closeout-reporter`, `asr3601-fix-verifier`, `asr3601-lvgl-firmware-triage`, `asr3601-project-onboard`, `asr3601-protocol-branch-matrix`, `asr3602-dump-firmware`, `asr3602-local-build-flash`, `catstudio-log-extractor`, `catstudio-online-log`, `code-review`, `codex-ccswitch-mobile`, `codex-clash-proxy`, `esp32-c5-eim-jtag-flash`, `grill-with-docs`, `obsidian-fix-pattern-memory`, `playwright`, `to-prd`, `zentao-bug-resolver`, `zentao-bug-triage`
+`aa-skill-router`, `akq-firmware-release`, `asr3601-bug-intake-orchestrator`, `asr3601-cross-branch-porting`, `asr3601-fix-closeout-reporter`, `asr3601-fix-verifier`, `asr3601-lvgl-firmware-triage`, `asr3601-project-onboard`, `asr3601-protocol-branch-matrix`, `asr3602-dump-firmware`, `asr3602-local-build-flash`, `asr360x-feature-closure-auditor`, `catstudio-log-extractor`, `catstudio-online-log`, `codex-ccswitch-mobile`, `codex-clash-proxy`, `esp32-c5-eim-jtag-flash`, `obsidian-fix-pattern-memory`, `skill-usage-tracker`, `zentao-bug-resolver`, `zentao-bug-triage`
 
 </details>
 

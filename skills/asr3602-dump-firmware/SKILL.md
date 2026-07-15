@@ -54,23 +54,24 @@ Use `-SkipBuild -NoFlash` only to validate the script mechanics against an exist
 If the script cannot run, do the same sequence manually:
 
 1. Confirm the repo and current branch are the intended LT52 ASR3602 workspace.
-2. Run `git status --short` and note unrelated user changes; do not revert them.
-3. Save the exact original text of `releasepack/reliabledata/asr3602_evb/config.json`.
-4. Remove only the JSON object whose `id` is `CDF` and `image` is `EEHandlerConfig.nvm`.
-5. Build:
+2. Read `.codex-project\variant.md` when present and confirm repo, branch, commit, dirty state, `yl_device_ver`, CHIP_ID, TARGET_OS, PS_MODE, protocol, customer/product variant, and Zentao mapping. Refresh it with `asr3601-project-onboard` when missing or stale.
+3. Run `git status --short` and note unrelated user changes; do not revert them.
+4. Save the exact original text of `releasepack/reliabledata/asr3602_evb/config.json`.
+5. Remove only the JSON object whose `id` is `CDF` and `image` is `EEHandlerConfig.nvm`.
+6. Build:
 
 ```powershell
 make craneg_modem_watch TARGET_OS=ALIOS PS_MODE=LITE_LTEONLY CHIP_ID=CRANEL
 ```
 
-6. Restore `config.json` from the saved original immediately after build completion/failure.
-7. Verify the watchdog deletion is not left in the working tree:
+7. Restore `config.json` from the saved original immediately after build completion/failure.
+8. Verify the watchdog deletion is not left in the working tree:
 
 ```powershell
 git diff -- releasepack/reliabledata/asr3602_evb/config.json
 ```
 
-8. Flash the non-source package:
+9. Flash the non-source package:
 
 ```powershell
 prebuilts\misc\windows-x86\adownload.exe -u -a -s 115200 -r -q out\product\craneg_modem_watch\craneg_modem_watch_asr3602_8+8mb.zip

@@ -10,13 +10,14 @@ Use this skill for code-level investigation and narrow firmware fixes after the 
 ## Start Here
 
 1. Read local project instructions first: `AGENTS.md`, build notes, and any user-attached screenshots, videos, logs, PDFs, or protocol notes.
-2. Identify the active workspace and product variant before editing. Distinguish at least:
+2. Read `.codex-project/variant.md` when present and confirm repo, branch, commit, dirty state, `yl_device_ver`, chip, OS, protocol, customer/product variant, build parameters, and Zentao mapping. If the fingerprint is missing or stale, refresh it through `asr3601-project-onboard` before editing.
+3. Identify the active workspace and product variant before editing. Distinguish at least:
    - `D:\XM\360x_202403r1`
    - `D:\XM\crane-2024.03_r4`
    - standard watch, sport watch, and phone/simulator targets
-3. If the user asks “有没有/能不能做/先告诉我”, answer the existence and feasibility question before making edits.
-4. Prefer `rg`, CodeGraph, and existing project symbols/resources over broad filesystem scanning or invented names.
-5. Avoid changing unrelated variants. If the user says “不动运动版” or similar, explicitly preserve that boundary.
+4. If the user asks “有没有/能不能做/先告诉我”, answer the existence and feasibility question before making edits.
+5. Prefer `rg`, CodeGraph, and existing project symbols/resources over broad filesystem scanning or invented names.
+6. Avoid changing unrelated variants. If the user says “不动运动版” or similar, explicitly preserve that boundary.
 
 ## Mandatory Evidence Gate
 

@@ -1,6 +1,6 @@
 ---
 name: asr3601-project-onboard
-description: Initialize or refresh local project context for ASR3601/ASR3602/360x/Crane/LVGL firmware repositories. Use when the user asks 初始化当前 360x 项目上下文, 生成项目 AGENTS, 新项目接入 Codex, 当前工程怎么配置, 记录这个项目编译命令, project onboarding, or when a new firmware checkout needs project-level AGENTS.md, .codex-project index/build/zentao/protocol files, and local git exclude entries.
+description: Initialize or refresh local project context and a canonical variant fingerprint for ASR3601/ASR3602/360x/Crane/LVGL firmware repositories. Use when the user asks 初始化当前 360x 项目上下文, 生成项目 AGENTS, 新项目接入 Codex, 当前工程怎么配置, 记录这个项目编译命令, 生成变体指纹, project onboarding, or when a new firmware checkout needs project-level AGENTS.md, .codex-project index/build/zentao/protocol/variant files, and local git exclude entries.
 ---
 
 # ASR3601 Project Onboard
@@ -32,9 +32,12 @@ AGENTS.md
 .codex-project\zentao.md
 .codex-project\build.md
 .codex-project\protocol.md
+.codex-project\variant.md
 ```
 
 5. Add these local context files to `.git\info\exclude` so they do not pollute source commits.
+6. Treat `.codex-project\variant.md` as the canonical preflight fingerprint for every ASR bug, port, verification, build, release, protocol, and Zentao workflow. It must include repo, branch, commit, dirty state, `yl_device_ver`, chip, OS, protocol, customer/product variant, build parameters, and Zentao mapping.
+7. In the completion response, provide clickable absolute Markdown links for `AGENTS.md` and every generated `.codex-project` file. When a protocol document is mapped, also provide clickable links to its original and searchable extracted file.
 
 ## Script
 

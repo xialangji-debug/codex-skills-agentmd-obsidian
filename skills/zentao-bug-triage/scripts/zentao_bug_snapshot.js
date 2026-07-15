@@ -9,6 +9,47 @@ const cp = require("child_process");
 const SITE_URL = "http://zentao.hzyuelan.com/zentao";
 const PROJECT_CACHE_PATH = path.join(os.homedir(), ".codex", "zentao-bug-triage", "project-cache.json");
 
+function loadPlaywright() {
+  const errors = [];
+  try {
+    return require("playwright");
+  } catch (error) {
+    errors.push(error);
+  }
+
+  const runtimesRoot = path.join(os.homedir(), ".cache", "codex-runtimes");
+  if (fs.existsSync(runtimesRoot)) {
+    for (const runtime of fs.readdirSync(runtimesRoot, { withFileTypes: true })) {
+      if (!runtime.isDirectory()) continue;
+      const pnpmRoot = path.join(
+        runtimesRoot,
+        runtime.name,
+        "dependencies",
+        "node",
+        "node_modules",
+        ".pnpm",
+      );
+      if (!fs.existsSync(pnpmRoot)) continue;
+
+      const packages = fs.readdirSync(pnpmRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && /^playwright@/.test(entry.name))
+        .sort((a, b) => b.name.localeCompare(a.name));
+      for (const pkg of packages) {
+        const candidate = path.join(pnpmRoot, pkg.name, "node_modules", "playwright");
+        if (!fs.existsSync(candidate)) continue;
+        try {
+          return require(candidate);
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+    }
+  }
+
+  const reasons = errors.map((error) => error.message).filter(Boolean).join(" | ");
+  throw new Error(`Cannot load Playwright${reasons ? `: ${reasons}` : ""}`);
+}
+
 function parseArgs(argv) {
   const args = {
     repo: process.cwd(),
@@ -503,6 +544,8 @@ async function extractBugRows(page) {
 async function gotoNextPage(page) {
   const frame = await waitForContentFrame(page, /共\s*\d+\s*页|Bug标题|bug-view-\d+/);
   const candidates = [
+    "a.pager-link[title='下一页']",
+    "a[title='下一页']",
     ".pager a[title='下一页']",
     ".pager a.next",
     "a:has-text('下一页')",
@@ -514,6 +557,12 @@ async function gotoNextPage(page) {
     if (await loc.count()) {
       const cls = await loc.evaluate((el) => `${el.className} ${el.parentElement?.className || ""}`).catch(() => "");
       if (/disabled/.test(cls)) return false;
+      const href = await loc.evaluate((el) => el.href || "").catch(() => "");
+      if (href) {
+        await page.goto(href, { waitUntil: "domcontentloaded", timeout: 60000 });
+        await page.waitForTimeout(800);
+        return true;
+      }
       await Promise.all([
         page.waitForLoadState("domcontentloaded", { timeout: 60000 }).catch(() => {}),
         loc.click(),
@@ -1730,7 +1779,7 @@ async function main() {
   const attachmentRoot = path.join(outRoot, "attachments");
   fs.mkdirSync(outRoot, { recursive: true });
 
-  const { chromium } = require("playwright");
+  const { chromium } = loadPlaywright();
   const credentials = loadCredential();
   let browser;
   let lastLaunchError;

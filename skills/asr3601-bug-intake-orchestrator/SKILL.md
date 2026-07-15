@@ -32,7 +32,12 @@ Collect or infer these fields before code edits:
 当前分支：
 当前提交：
 dirty worktree：
-产品/协议变体：360x / C10 公版 / C10 乐智 / LT52 / APP 协议 / 小程序协议 / YL / AKQ / 未确认
+yl_device_ver：
+芯片 / OS / PS_MODE：
+协议：APP / 小程序 / 乐智 / YL / AKQ / 未确认
+客户/产品变体：
+构建命令：
+禅道映射：
 用户目标：只判断 / 修复 / 移植 / 抓 bug / 关闭禅道 / 写报告
 步骤：
 实际结果：
@@ -42,6 +47,8 @@ dirty worktree：
 历史记忆命中：
 第一结论：
 ```
+
+Prefer `.codex-project/variant.md` as the canonical variant fingerprint. If it is missing or stale, run `asr3601-project-onboard` first or collect the same fields from current repository evidence. Never infer the protocol from the customer name alone.
 
 For Git workspaces, run non-destructive context checks early:
 

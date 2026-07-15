@@ -1,4 +1,4 @@
 interface:
   display_name: "ASR3601 Fix Closeout"
-  short_description: "Summarize fixes, checks, and reports"
-  default_prompt: "Use $asr3601-fix-closeout-reporter to close out this ASR3601 firmware fix with verification, memory, and Zentao-ready notes."
+  short_description: "Close fixes and aggregate validation debt"
+  default_prompt: "Use $asr3601-fix-closeout-reporter to close this firmware fix or report pending validation debt with canonical variant context."

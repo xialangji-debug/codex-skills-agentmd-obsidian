@@ -44,6 +44,7 @@ Preferred fast path: use `scripts/akq_release.ps1` for normal releases. It perfo
 
 1. Identify the release context:
    - Run `git status --short`, `git branch --show-current`, and `git rev-parse --short HEAD`.
+   - Read `.codex-project\variant.md` when present and confirm repo, branch, commit, dirty state, `yl_device_ver`, chip, OS, protocol, customer/product variant, build parameters, and Zentao mapping. Refresh it with `asr3601-project-onboard` if missing or stale; never reuse another customer's release fingerprint.
    - Treat `??` files under source/config paths as a release blocker before clean builds. Commit them when the user requested commits; otherwise confirm before bypassing with `-AllowUntrackedSource`.
    - Find `gui/lv_watch/lv_apps/yl/yl.h` or search with `rg -n "yl_device_ver"`.
    - Extract `yl_device_ver`, `yl_device_name`, `yl_hw_ver`, and `yl_soft_ver`.

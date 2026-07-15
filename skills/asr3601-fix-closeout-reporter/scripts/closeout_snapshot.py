@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 from pathlib import Path
 
@@ -13,6 +14,8 @@ def run(command: list[str] | str, cwd: Path, shell: bool = False, timeout: int =
             cwd=str(cwd),
             shell=shell,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             timeout=timeout,
@@ -28,6 +31,119 @@ def section(title: str, body: str, limit: int = 6000) -> str:
     if len(body) > limit:
         body = body[:limit] + "\n... (truncated)"
     return f"## {title}\n\n```text\n{body}\n```"
+
+
+def clean_markdown_value(value: str) -> str:
+    return value.strip().strip(chr(96)).strip()
+
+
+def read_yl_device_ver(repo: Path) -> str:
+    path = repo / "gui" / "lv_watch" / "lv_apps" / "yl" / "yl.h"
+    if not path.exists():
+        return "不可用"
+    text = path.read_text(encoding="utf-8", errors="replace")
+    match = re.search(r"^\s*#define\s+yl_device_ver\s+\"([^\"]+)\"", text, re.MULTILINE)
+    return match.group(1) if match else "不可用"
+
+
+def canonical_variant_snapshot(
+    repo: Path, live_branch: str, live_commit: str, live_dirty: str
+) -> tuple[str, list[str]]:
+    path = repo / ".codex-project" / "variant.md"
+    if not path.exists():
+        return (
+            "状态：缺失\n"
+            f"文件：{path}\n"
+            "下一动作：先运行 asr3601-project-onboard 生成 canonical variant fingerprint",
+            ["variant.md 缺失"],
+        )
+
+    text = path.read_text(encoding="utf-8-sig", errors="replace")
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        match = re.match(r"^\s*-\s*(.+?)\s*[：:]\s*(.*?)\s*$", line)
+        if match:
+            fields[clean_markdown_value(match.group(1))] = clean_markdown_value(match.group(2))
+
+    fence = chr(96) * 3
+    dirty_match = re.search(
+        rf"-\s*dirty worktree\s*[：:]\s*\r?\n\s*{re.escape(fence)}text\s*\r?\n"
+        rf"(.*?)\r?\n{re.escape(fence)}",
+        text,
+        re.DOTALL,
+    )
+    if dirty_match:
+        fields["dirty worktree"] = dirty_match.group(1).strip() or "干净"
+
+    required = (
+        "verified_at",
+        "repo",
+        "branch",
+        "commit",
+        "dirty worktree",
+        "yl_device_ver",
+        "CHIP_ID",
+        "TARGET_OS",
+        "PS_MODE",
+        "协议",
+        "客户/产品变体",
+        "构建命令",
+        "禅道项目",
+        "project_id",
+        "product_id",
+        "映射状态",
+    )
+    errors = [f"缺少字段：{key}" for key in required if key not in fields]
+
+    variant_repo = fields.get("repo", "")
+    if variant_repo:
+        try:
+            if str(Path(variant_repo).resolve()).casefold() != str(repo.resolve()).casefold():
+                errors.append(f"repo 已过期：{variant_repo}")
+        except OSError:
+            errors.append(f"repo 无法解析：{variant_repo}")
+    if fields.get("branch") != live_branch:
+        errors.append(f"branch 已过期：{fields.get('branch', '未记录')} -> {live_branch}")
+    if fields.get("commit") != live_commit:
+        errors.append(f"commit 已过期：{fields.get('commit', '未记录')} -> {live_commit}")
+
+    normalized_live_dirty = live_dirty.strip() or "干净"
+    if fields.get("dirty worktree") != normalized_live_dirty:
+        errors.append("dirty worktree 已变化")
+
+    live_device_ver = read_yl_device_ver(repo)
+    if fields.get("yl_device_ver") != live_device_ver:
+        errors.append(
+            f"yl_device_ver 已过期：{fields.get('yl_device_ver', '未记录')} -> {live_device_ver}"
+        )
+
+    display_keys = (
+        "verified_at",
+        "repo",
+        "branch",
+        "commit",
+        "dirty worktree",
+        "yl_device_ver",
+        "CHIP_ID",
+        "TARGET_OS",
+        "PS_MODE",
+        "协议",
+        "客户/产品变体",
+        "构建命令",
+        "禅道项目",
+        "project_id",
+        "product_id",
+        "映射状态",
+    )
+    lines = [f"状态：{'过期/不完整' if errors else '与当前 checkout 一致'}", f"文件：{path}"]
+    for key in display_keys:
+        value = fields.get(key, "未记录").replace("\r\n", "；").replace("\n", "；")
+        lines.append(f"{key}：{value}")
+    if errors:
+        lines.append("需要先刷新：")
+        lines.extend(f"- {error}" for error in errors)
+        lines.append("- 运行 asr3601-project-onboard 后再继续收尾")
+    return "\n".join(lines), errors
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,6 +171,17 @@ def main() -> int:
         print()
         print("结论：无法执行 Git/diff 前置验证")
         return 1
+
+    _, live_branch = run(["git", "branch", "--show-current"], repo, timeout=60)
+    _, live_commit = run(["git", "rev-parse", "--short", "HEAD"], repo, timeout=60)
+    _, live_dirty = run(["git", "status", "--short"], repo, timeout=60)
+    variant_body, variant_errors = canonical_variant_snapshot(
+        repo, live_branch.strip(), live_commit.strip(), live_dirty
+    )
+    if variant_errors:
+        failures += 1
+    print(section("canonical .codex-project/variant.md", variant_body))
+    print()
 
     checks: list[tuple[str, list[str] | str, bool, int, bool]] = [
         ("git status --short", ["git", "status", "--short"], False, 60, False),
@@ -96,6 +223,14 @@ def main() -> int:
     print()
     print(
         "```text\n"
+        "变体指纹：\n"
+        "  repo：\n"
+        "  branch / commit / dirty：\n"
+        "  yl_device_ver：\n"
+        "  CHIP_ID / TARGET_OS / PS_MODE：\n"
+        "  协议 / 客户产品：\n"
+        "  构建命令：\n"
+        "  禅道映射：\n"
         "问题：\n"
         "根因：\n"
         "修改：\n"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Skill Usage & Registry Auditor"
+  short_description: "Track usage and audit local skill routes"
+  default_prompt: "Use $skill-usage-tracker to audit my local skill registry and routing index."

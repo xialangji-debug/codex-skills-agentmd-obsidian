@@ -1,6 +1,7 @@
 ---
 name: catstudio-online-log
-description: Prepare ASR CATStudio online LogViewer after flashing firmware: select Generic Target Online, ensure the current craneg_modem_watch .mdb.txt database, open the LogViewer filter panel, and apply a narrow wxpay/camera/MMI whitelist. Use for requests such as 打开CAT日志, 选择在线日志, 刷完机打开cat软件, 在线日志筛选, 微信支付扫码日志. This skill only prepares live logging; it does not flash firmware, receive YModem dump files, or build dump firmware.
+description: >-
+  Prepare ASR CATStudio online LogViewer after flashing firmware: select Generic Target Online, ensure the current craneg_modem_watch .mdb.txt database, open the LogViewer filter panel, and apply a narrow wxpay/camera/MMI whitelist. Use for requests such as 打开CAT日志, 选择在线日志, 刷完机打开cat软件, 在线日志筛选, 微信支付扫码日志. This skill only prepares live logging; it does not flash firmware, receive YModem dump files, or build dump firmware.
 ---
 
 # CATStudio Online Log

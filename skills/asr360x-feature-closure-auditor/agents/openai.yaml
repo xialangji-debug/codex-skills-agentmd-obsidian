@@ -1,0 +1,4 @@
+interface:
+  display_name: "ASR360x 功能闭包审计"
+  short_description: "审计 ASR360x 客户分支功能裁剪、保留与协议残留的完整性"
+  default_prompt: "使用 $asr360x-feature-closure-auditor 审计当前 ASR360x 客户分支指定功能的全链路闭包。"

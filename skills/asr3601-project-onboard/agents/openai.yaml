@@ -1,6 +1,4 @@
 interface:
-  display_name: "360x项目初始化"
-  short_description: "为360x固件仓库生成项目级AGENTS和上下文索引"
-  default_prompt: "Use $asr3601-project-onboard to inspect the current ASR3601/ASR3602 firmware project and generate local AGENTS.md plus .codex-project context files."
-policy:
-  allow_implicit_invocation: true
+  display_name: "360x 项目初始化"
+  short_description: "生成项目上下文、构建映射与可复核的 ASR 变体指纹"
+  default_prompt: "Use $asr3601-project-onboard to generate local project context and a canonical ASR variant fingerprint for this firmware checkout."

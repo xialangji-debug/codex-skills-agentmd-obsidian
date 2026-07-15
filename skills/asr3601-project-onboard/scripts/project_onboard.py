@@ -7,11 +7,15 @@ import argparse
 import re
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 
 CODEX_HOME = Path.home() / ".codex"
 PROJECT_MAP = CODEX_HOME / "skills" / "zentao-bug-triage" / "references" / "project-map.md"
+PROTOCOL_ROOT = Path.home() / "Documents" / "Obsidian" / "CodexVault" / "Codex" / "references" / "asr3601-protocols"
+JUNICARE_PROTOCOL_PDF = PROTOCOL_ROOT / "raw" / "20260707-junicare-app-protocol-v1.201-for-yuelan.pdf"
+JUNICARE_PROTOCOL_TEXT = PROTOCOL_ROOT / "extracted" / "20260707-junicare-app-protocol-v1.201-for-yuelan.md"
 
 
 @dataclass
@@ -193,6 +197,10 @@ def protocol_profile(info: RepoInfo) -> tuple[str, str]:
     text = raw.lower()
     family = product_family(info)
 
+    # Every product branch in this Crane 3603 checkout is an overseas APP variant.
+    if info.name.lower() == "crane-2024.03_r4":
+        return f"{family} APP 协议（海外版本）", "APP 协议 > 海外平台协议 > 公共固件逻辑"
+
     if "lz" in text or "乐智" in raw or "电信" in raw:
         return f"{family} 电信乐智协议", "电信乐智协议 > 平台协议 > 公共固件逻辑"
     if "app" in text and "xcx" not in text:
@@ -232,6 +240,14 @@ def build_command(info: RepoInfo) -> tuple[str, str]:
     )
 
 
+def build_identity(command: str) -> tuple[str, str, str]:
+    def value(name: str) -> str:
+        match = re.search(rf"(?:^|\s){re.escape(name)}=([^\s]+)", command)
+        return match.group(1) if match else "未确认"
+
+    return value("CHIP_ID"), value("TARGET_OS"), value("PS_MODE")
+
+
 def gather(repo: Path) -> RepoInfo:
     repo = repo.resolve()
     yl = read_yl(repo)
@@ -251,11 +267,23 @@ def render_files(info: RepoInfo) -> dict[str, str]:
     mapping = match_mapping(info)
     product, protocol_priority = protocol_profile(info)
     build, build_source = build_command(info)
+    chip_id, target_os, ps_mode = build_identity(build)
+    verified_at = datetime.now().astimezone().isoformat(timespec="seconds")
     zentao_name = mapping.zentao_names[0] if mapping.zentao_names else "未确认"
     project_id = mapping.project_id or "未确认"
     product_id = mapping.product_id or "未确认"
     verified = mapping.verified or "未确认"
     mapping_status = "confirmed" if mapping.project_id and mapping.status != "unconfirmed" else "needs-confirmation"
+    protocol_links = ""
+    if "APP 协议（海外版本）" in product:
+        protocol_links = f"""
+## 协议地址
+
+- [JuniCare APP 协议 V1.201 PDF 原件]({JUNICARE_PROTOCOL_PDF.as_posix()})
+- [JuniCare APP 协议 V1.201 可搜索文本]({JUNICARE_PROTOCOL_TEXT.as_posix()})
+- [协议资料索引]({(PROTOCOL_ROOT / 'index.md').as_posix()})
+- [协议与分支矩阵]({(PROTOCOL_ROOT / 'matrix.md').as_posix()})
+"""
 
     agents = f"""# Project Context
 
@@ -273,10 +301,11 @@ def render_files(info: RepoInfo) -> dict[str, str]:
 
 更多细节按需读取：
 
-- `.codex-project/index.md`
-- `.codex-project/zentao.md`
-- `.codex-project/build.md`
-- `.codex-project/protocol.md`
+- [项目索引]({(info.root / '.codex-project' / 'index.md').as_posix()})
+- [禅道配置]({(info.root / '.codex-project' / 'zentao.md').as_posix()})
+- [构建说明]({(info.root / '.codex-project' / 'build.md').as_posix()})
+- [协议配置]({(info.root / '.codex-project' / 'protocol.md').as_posix()})
+- [变体指纹]({(info.root / '.codex-project' / 'variant.md').as_posix()})
 """
 
     index = f"""# {info.name} Codex Project Index
@@ -298,6 +327,7 @@ def render_files(info: RepoInfo) -> dict[str, str]:
 | CATStudio / 日志 | `catstudio-log-extractor` |
 | 收工 / 解决说明 | `asr3601-fix-closeout-reporter` |
 | 编译 / 验证 | `.codex-project/build.md` |
+| 变体确认 / 客户能力边界 | `.codex-project/variant.md` |
 
 ## 注意
 
@@ -356,6 +386,7 @@ node \"$env:USERPROFILE\\.codex\\skills\\zentao-bug-triage\\scripts\\zentao_bug_
 - 协议优先级：{protocol_priority}
 - `yl_device_ver`：`{info.yl_device_ver}`
 - `yl_hw_ver`：`{info.yl_hw_ver}`
+{protocol_links}
 
 ## 使用规则
 
@@ -365,12 +396,48 @@ node \"$env:USERPROFILE\\.codex\\skills\\zentao-bug-triage\\scripts\\zentao_bug_
 - 当前项目的协议优先级高于全局泛化判断。
 """
 
+    variant_md = f"""# ASR Variant Fingerprint
+
+- verified_at：`{verified_at}`
+- repo：`{info.root}`
+- branch：`{info.branch}`
+- commit：`{info.commit}`
+- dirty worktree：
+
+```text
+{info.dirty}
+```
+
+- 产品族：`{product_family(info)}`
+- 客户/产品变体：`{info.branch}`
+- `yl_device_name`：`{info.yl_device_name}`
+- `yl_device_ver`：`{info.yl_device_ver}`
+- `yl_hw_ver`：`{info.yl_hw_ver}`
+- CHIP_ID：`{chip_id}`
+- TARGET_OS：`{target_os}`
+- PS_MODE：`{ps_mode}`
+- 协议：`{product}`
+- 协议优先级：`{protocol_priority}`
+- 构建命令：`{build}`
+- 禅道项目：`{zentao_name}`
+- project_id：`{project_id}`
+- product_id：`{product_id}`
+- 映射状态：`{mapping_status}`
+
+## 使用规则
+
+- 每次修复、移植、验证、构建、发布或禅道操作前重新核对 branch、commit、dirty 和 `yl_device_ver`。
+- 客户/产品变体不等于协议；协议只按 APP、小程序、乐智及明确的平台路径判断。
+- 指纹与当前仓库不一致时，先重新运行 project-onboard，不沿用旧构建或禅道映射。
+"""
+
     return {
         "AGENTS.md": agents,
         ".codex-project/index.md": index,
         ".codex-project/zentao.md": zentao,
         ".codex-project/build.md": build_md,
         ".codex-project/protocol.md": protocol_md,
+        ".codex-project/variant.md": variant_md,
     }
 
 
