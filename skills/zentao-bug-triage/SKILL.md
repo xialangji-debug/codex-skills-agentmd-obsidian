@@ -12,10 +12,14 @@ Use this skill to turn Zentao bugs into a branch-aware triage table before editi
 - Do not store the Zentao password in `SKILL.md`, Obsidian, GitHub, final answers, logs, or generated reports.
 - Load credentials only from `%USERPROFILE%\.codex\secrets\zentao-bug-triage\zentao.credential.xml` or ask the user if that file is missing/rejected.
 - Do not blindly fix a bug after fetching it. First report whether it exists in the current branch, likely module, difficulty, logs needed, and whether Codex can handle it.
+- Treat fix-pattern memory as supporting evidence, never as proof that the current branch has the same root cause. Keep `记忆命中` separate from `修复资格`.
+- `可直接修复候选` is only a triage label. Before editing, still deep-fetch the bug, inspect the current code path, check relevant Git history and local changes, and verify that the remembered fix applies to this variant.
+- Never mark list-only, reactivated, platform/backend, low-level/hardware/driver, or log-dependent-without-evidence bugs as direct repair candidates.
 - Do not directly handle low-level hardware/driver/power/modem/platform-server bugs. Give evidence, needed logs, and a suggested owner/debug path.
 - Use current-project fetching by default in firmware workspaces: resolve the branch/version through `references/project-map.md`, fetch that Zentao project, and fall back to assigned bugs when no confirmed mapping exists, when project ID discovery fails, or when the project/list page returns zero rows.
 - For current-branch bug fetching, trust only the current Git worktree and branch from `--repo`; do not infer the branch from browser state, an old snapshot, Obsidian memory, or another worktree. In multi-worktree folders, pass `--expect-repo-name` and `--expect-branch` so the script aborts before opening Zentao if the working directory is wrong.
 - By default, open the detail page for every fetched bug and download every attachment. Do not use the fast list mode unless the user explicitly asks for a fast/no-attachment listing.
+- If a full detail/attachment fetch times out, retry with a longer timeout or higher detail concurrency, or split the same bug IDs into smaller deep-fetch batches and preserve all downloaded evidence. Never fall back to `--detail-limit 0` or `--no-download-attachments`, and never present a list-only snapshot as the completed result, unless the user explicitly requested a fast/no-attachment listing.
 - Download attachments/logs automatically for selected bug IDs, log-needed bugs, or common log/video/image attachments, and keep them under the local snapshot folder.
 - Always treat `triage.md` as the full snapshot, `work-items.md` as the temporary repair queue, and `ignored-items.md` as the temporary skip/waiting list.
 - Always treat `chat-summary.md` as the user-facing conversation table. After fetching bugs, paste this compact table in the chat; do not make the user open Markdown files just to choose bug IDs.
@@ -91,10 +95,12 @@ node "$env:USERPROFILE\.codex\skills\zentao-bug-triage\scripts\zentao_bug_snapsh
 ```
 
    - Each snapshot writes:
-     - `triage.md`: all fetched bugs and first-pass handling decision.
-     - `chat-summary.md`: compact chat table with ID, title, category, handling suggestion, attachment type, and whether Codex can inspect/fix first. Paste this table into the final answer after every fetch.
-     - `work-items.md`: bugs Codex should inspect/fix next, plus candidate bugs that have a clear expected result or attachment evidence and should be shown to the user for selection.
+     - `triage.md`: all fetched bugs, first-pass handling decision, memory match level, and repair eligibility.
+     - `chat-summary.md`: compact chat table with ID, title, category, memory match, repair eligibility, handling suggestion, and attachment type. Paste this table into the final answer after every fetch.
+     - `work-items.md`: bugs Codex should inspect/fix next, candidate fix-pattern paths/evidence, mandatory pre-edit checks, and candidate bugs that have a clear expected result or attachment evidence.
      - `ignored-items.md`: bugs to skip this round, wait for logs/confirmation, or send to platform/driver/hardware owners.
+   - Memory linkage is read-only and enabled by default. It indexes Markdown under `%USERPROFILE%\Documents\Obsidian\CodexVault\Codex\fix-patterns`, keeps at most three candidates per bug, and emits `高` / `中` / `低` / `未命中`. Use `--fix-patterns <path>` to override the folder or `--no-memory-link` for an isolated run.
+   - A high match requires an already verified note plus multiple evidence dimensions and a same-project or code-symbol signal. Same device/branch text alone must not produce a match.
    - The deep-fetch command fills `work-items.md` with full detail, history records, latest activation note, and attachment paths. Before later fixing “这些bug”, read the latest or user-specified `work-items.md` first and base the fix on its detail fields and attachments.
    - For bugs assigned to the user regardless of project:
 
@@ -110,7 +116,9 @@ node "$env:USERPROFILE\.codex\skills\zentao-bug-triage\scripts\zentao_bug_snapsh
 
 3. Classify and report:
    - Read `references/classification-rules.md` before judging a fetched table.
-   - Produce a compact chat table with: ID, title, category, handling suggestion, attachment type, and whether Codex can inspect/fix first. Keep this table in the response even when snapshot paths are also provided.
+   - Produce a compact chat table with: ID, title, category, memory match, repair eligibility, handling suggestion, and attachment type. Keep this table in the response even when snapshot paths are also provided.
+   - Explain `高` / `中` / `低` matches using the top candidate's project/branch, keywords, code symbols, symptom overlap, and verification state. Do not expose the full note body in the snapshot.
+   - Interpret repair eligibility conservatively: `可直接修复候选`, `可移植候选`, `需先查代码`, `需先深抓`, `需日志验证`, `复测激活-需重新定位`, `非固件问题`, or `需底层/硬件处理`.
    - Keep detailed metadata in `triage.md`; do not paste the full wide triage table into chat unless the user asks for all details.
    - For each bug, state whether it enters `work-items.md`, needs deep-fetch first, waits for logs/confirmation, defers to platform/backend, or defers to hardware/driver owner.
 
@@ -155,7 +163,8 @@ node "$env:USERPROFILE\.codex\skills\zentao-bug-triage\scripts\zentao_bug_snapsh
 
 ## Resources
 
-- `scripts/zentao_bug_snapshot.js`: login, resolve current branch to a Zentao project, fetch project/assigned/selected bugs, classify, auto-download relevant attachments, save JSON/Markdown snapshots, generate temporary `work-items.md`/`ignored-items.md`, and clean temporary work orders/attachments.
+- `scripts/zentao_bug_snapshot.js`: login, resolve current branch to a Zentao project, fetch project/assigned/selected bugs, classify, link fix-pattern memory, auto-download relevant attachments, save JSON/Markdown snapshots, generate temporary `work-items.md`/`ignored-items.md`, and clean temporary work orders/attachments.
+- `scripts/memory_linkage.js`: read-only fix-pattern indexing, bug fingerprint scoring, high/medium/low/no-match classification, and conservative repair eligibility.
 - `references/classification-rules.md`: category, difficulty, and “can Codex handle” rules.
 - `references/project-map.md`: current branch/version tokens to Zentao project/product names.
 - `references/local-storage.md`: snapshot and Obsidian storage conventions.

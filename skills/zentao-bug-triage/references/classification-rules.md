@@ -96,11 +96,33 @@ Default handling:
 - Compare code history against the latest activation time. A commit before activation is not enough proof of fix when the tester says it still reproduces.
 - When the activation note says a specific build was not fixed, report that build/version explicitly before code analysis.
 
+## Memory Linkage
+
+- Read fix-pattern notes only from the configured local `fix-patterns` folder. Do not write or update memory during bug fetching.
+- Score evidence from explicit keywords, code identifiers, business-domain terms, symptom overlap, current repo/branch applicability, and note verification status.
+- Device, branch, or repo text is context evidence only. It cannot create a match without issue-specific evidence.
+- Keep at most three candidates and expose only title, path, score, verification state, and concise reasons.
+- `高`: score at least 10, note is verified, at least two evidence dimensions match, and either project applicability or a code identifier matches.
+- `中`: score at least 6 but high-confidence gates are incomplete.
+- `低`: score at least 3 with issue-specific evidence.
+- `未命中`: no candidate passes the minimum issue-evidence gate.
+
+## Repair Eligibility
+
+- `可直接修复候选`: full detail is available, expected behavior is clear, handling queue is `work`, and an already verified same-project memory note has a high match. This label still requires current-code and Git checks before editing.
+- `可移植候选`: high/medium memory match exists, but branch, project, or evidence is not sufficient to apply it directly.
+- `需先查代码`: firmware-owned candidate without reliable memory evidence.
+- `需先深抓`: only list-row information is available.
+- `需日志验证`: a log-dependent issue has no usable attachment/evidence.
+- `复测激活-需重新定位`: never directly reuse the old fix; use the latest activation note and timestamp.
+- `非固件问题`: current evidence points to platform/backend/configuration.
+- `需底层/硬件处理`: driver, hardware, power, modem, crash, or dump evidence is required.
+
 ## Report Table Columns
 
 Use these columns unless the user asks otherwise:
 
-| ID | 标题 | 类型 | 处理建议 | 附件 | 我能否先修 |
-| --- | --- | --- | --- | --- | --- |
+| ID | 标题 | 类型 | 记忆命中 | 修复资格 | 处理建议 | 附件 |
+| --- | --- | --- | --- | --- | --- | --- |
 
 Use `triage.md` for the full wide table with product, severity, dates, activation, and detailed reasons. Chat replies should default to the compact table above.

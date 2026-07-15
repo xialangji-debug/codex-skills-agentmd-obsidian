@@ -5,6 +5,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const cp = require("child_process");
+const { enrichBugsWithMemory } = require("./memory_linkage");
 
 const SITE_URL = "http://zentao.hzyuelan.com/zentao";
 const PROJECT_CACHE_PATH = path.join(os.homedir(), ".codex", "zentao-bug-triage", "project-cache.json");
@@ -75,6 +76,8 @@ function parseArgs(argv) {
     expectBranch: "",
     writeObsidian: false,
     workMd: true,
+    memoryLink: true,
+    fixPatterns: path.join(os.homedir(), "Documents", "Obsidian", "CodexVault", "Codex", "fix-patterns"),
     cleanup: "",
   };
   for (let i = 2; i < argv.length; i++) {
@@ -116,6 +119,8 @@ function parseArgs(argv) {
     else if (a === "--write-obsidian") args.writeObsidian = true;
     else if (a === "--write-work-md") args.workMd = true;
     else if (a === "--no-work-md") args.workMd = false;
+    else if (a === "--fix-patterns") args.fixPatterns = next();
+    else if (a === "--no-memory-link") args.memoryLink = false;
     else if (a === "--cleanup") args.cleanup = next();
     else if (a === "--help" || a === "-h") {
       console.log(`Usage:
@@ -148,6 +153,9 @@ Defaults:
   Each snapshot writes triage.md, work-items.md, and ignored-items.md unless
   --no-work-md is passed. work-items.md contains bugs Codex should inspect/fix.
   ignored-items.md contains platform/low-level/log-needed/unclear issues to skip.
+  By default the snapshot reads fix-pattern Markdown notes and adds memory match
+  levels plus conservative repair eligibility. Use --fix-patterns to override the
+  memory folder or --no-memory-link to disable this read-only linkage.
   --cleanup deletes only work-items.md, ignored-items.md, and attachments/.
 `);
       process.exit(0);
@@ -1262,10 +1270,14 @@ function markdownReport(ctx, bugs) {
   if (typeof ctx.assignedScanCount === "number") lines.push(`- 指派给我候选：${ctx.assignedScanCount}`);
   if (ctx.fetchMode) lines.push(`- 抓取模式：${ctx.fetchMode}`);
   if (ctx.projectResolveReason) lines.push(`- 项目匹配：${ctx.projectResolveReason}`);
+  if (ctx.memory) {
+    lines.push(`- 记忆联动：${ctx.memory.enabled ? `已启用，索引 ${ctx.memory.indexedNotes} 条` : "未启用"}`);
+    if (ctx.memory.enabled) lines.push(`- 记忆命中：高 ${ctx.memory.counts?.高 || 0} / 中 ${ctx.memory.counts?.中 || 0} / 低 ${ctx.memory.counts?.低 || 0} / 未命中 ${ctx.memory.counts?.未命中 || 0}`);
+  }
   lines.push(`- dirty：${ctx.dirty ? "是" : "否"}`);
   lines.push("");
-  lines.push("| ID | 标题 | 产品/项目 | 状态 | 严重/优先 | 创建/修改/解决 | 激活 | 详情 | 分类 | 难度 | 本轮处理 | 附件 | 描述摘要 | Codex能否处理 | 建议/原因 |");
-  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+  lines.push("| ID | 标题 | 产品/项目 | 状态 | 严重/优先 | 创建/修改/解决 | 激活 | 详情 | 分类 | 难度 | 记忆命中 | 修复资格 | 本轮处理 | 附件 | 描述摘要 | 建议/原因 |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const b of bugs) {
     const attachmentText = `${(b.attachmentLinks || []).length}个链接/${(b.attachments || []).filter((a) => a.path).length}个已下载`;
     const currentNote = b.lastActivation?.note || b.steps || "";
@@ -1275,7 +1287,7 @@ function markdownReport(ctx, bugs) {
     const activationText = b.reactivated ? `${b.activationCount || 1}次/${b.lastActivation?.date || ""}` : "-";
     const handling = `${b.handlingLabel || ""}${b.handlingAction ? `(${b.handlingAction})` : ""}`;
     const advice = `${b.advice || ""}${b.handlingReason ? `；${b.handlingReason}` : ""}`.replace(/\|/g, "/");
-    lines.push(`| ${b.id} | ${b.title.replace(/\|/g, "/")} | ${(b.product || "").replace(/\|/g, "/")} | ${b.status || ""} | ${b.severity || ""}/${b.priority || ""} | ${dates} | ${activationText} | ${detailText} | ${b.category} | ${b.difficulty} | ${handling} | ${attachmentText} | ${stepsSummary} | ${b.canHandle} | ${advice} |`);
+    lines.push(`| ${b.id} | ${b.title.replace(/\|/g, "/")} | ${(b.product || "").replace(/\|/g, "/")} | ${b.status || ""} | ${b.severity || ""}/${b.priority || ""} | ${dates} | ${activationText} | ${detailText} | ${b.category} | ${b.difficulty} | ${compactMemoryText(b)} | ${compactEligibilityText(b)} | ${handling} | ${attachmentText} | ${stepsSummary} | ${advice} |`);
   }
   return lines.join("\n");
 }
@@ -1321,6 +1333,17 @@ function compactCanFixText(bug) {
   return bug.canHandle || "待判断";
 }
 
+function compactMemoryText(bug) {
+  const match = bug.memoryMatch;
+  if (!match) return "未评估";
+  const top = match.candidates?.[0];
+  return top ? `${match.level}(${match.score})：${compactTitle(top.title)}` : match.level;
+}
+
+function compactEligibilityText(bug) {
+  return bug.repairEligibility?.label || compactCanFixText(bug);
+}
+
 function chatSummaryReport(ctx, bugs, snapshotDir) {
   const lines = [];
   const workCount = bugs.filter((bug) => bug.handlingBucket === "work").length;
@@ -1339,13 +1362,17 @@ function chatSummaryReport(ctx, bugs, snapshotDir) {
   if (ctx.assignedToFilter) lines.push(`- 指派筛选：${ctx.assignedToFilter === "me" ? "当前账号" : ctx.assignedToFilter}`);
   if (typeof ctx.assignedScanCount === "number") lines.push(`- 指派给我候选：${ctx.assignedScanCount} 个`);
   lines.push(`- 数量：共 ${bugs.length} 个，候选/可修 ${workCount} 个，先不动 ${ignoredCount} 个`);
+  if (ctx.memory) {
+    lines.push(`- 记忆联动：${ctx.memory.enabled ? `索引 ${ctx.memory.indexedNotes} 条；高 ${ctx.memory.counts?.高 || 0} / 中 ${ctx.memory.counts?.中 || 0} / 低 ${ctx.memory.counts?.低 || 0} / 未命中 ${ctx.memory.counts?.未命中 || 0}` : "未启用"}`);
+    lines.push(`- 可直接修复候选：${ctx.memory.directCandidates || 0} 个；仍须先核对当前分支代码和 Git 历史`);
+  }
   if (detailFailedCount) lines.push(`- 详情失败：${detailFailedCount} 个，已保留列表摘要；修复前需用 --ids 重试深抓`);
   lines.push(`- 快照：${snapshotDir}`);
   lines.push("");
-  lines.push("| ID | 标题 | 类型 | 处理建议 | 附件 | 我能否先修 |");
-  lines.push("| --- | --- | --- | --- | --- | --- |");
+  lines.push("| ID | 标题 | 类型 | 记忆命中 | 修复资格 | 处理建议 | 附件 |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- |");
   for (const bug of bugs) {
-    lines.push(`| ${bug.id} | ${compactTitle(bug.title)} | ${compactCategory(bug)} | ${compactHandlingText(bug)} | ${compactAttachmentText(bug)} | ${compactCanFixText(bug)} |`);
+    lines.push(`| ${bug.id} | ${compactTitle(bug.title)} | ${compactCategory(bug)} | ${compactMemoryText(bug)} | ${compactEligibilityText(bug)} | ${compactHandlingText(bug)} | ${compactAttachmentText(bug)} |`);
   }
   return lines.join("\n");
 }
@@ -1375,6 +1402,23 @@ function suggestSearchKeywords(bug) {
   ].filter((word) => text.toLowerCase().includes(word.toLowerCase()));
   const codeLike = text.match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || [];
   return Array.from(new Set([...preferred, ...codeLike])).slice(0, 24);
+}
+
+function appendMemoryDetails(lines, bug) {
+  const match = bug.memoryMatch || { level: "未评估", score: 0, candidates: [] };
+  const eligibility = bug.repairEligibility || { label: "未评估", reason: "", requiredChecks: [] };
+  lines.push(`- 记忆命中：${match.level}${match.score ? `（${match.score}分）` : ""}`);
+  lines.push(`- 修复资格：${eligibility.label}${eligibility.directCandidate ? "（候选，不代表已获准直接修改）" : ""}`);
+  if (eligibility.reason) lines.push(`- 资格判断：${eligibility.reason}`);
+  if (eligibility.requiredChecks?.length) lines.push(`- 修改前检查：${eligibility.requiredChecks.join("；")}`);
+  if (match.candidates?.length) {
+    lines.push("- 关联修复记忆：");
+    for (const item of match.candidates) {
+      const verified = item.verification === "verified" ? "已验证" : item.verification === "unverified" ? "未验证" : "验证状态未知";
+      lines.push(`  - ${item.title}（${item.score}分，${verified}）：${item.path}`);
+      if (item.reasons?.length) lines.push(`    - 证据：${item.reasons.join("；")}`);
+    }
+  }
 }
 
 function workItemsReport(ctx, bugs, snapshotDir) {
@@ -1425,6 +1469,7 @@ function workItemsReport(ctx, bugs, snapshotDir) {
     lines.push(`- 本轮处理：${bug.handlingLabel} (${bug.handlingAction})`);
     lines.push(`- 入选原因：${bug.handlingReason}`);
     lines.push(`- 建议：${bug.advice}`);
+    appendMemoryDetails(lines, bug);
     lines.push(`- 代码搜索关键词：${keywords.length ? keywords.join("、") : "待人工补充"}`);
     lines.push("");
     lines.push("### 修复记录（临时）");
@@ -1516,10 +1561,10 @@ function ignoredItemsReport(ctx, bugs, snapshotDir) {
   if (ctx.fetchMode) lines.push(`- 抓取模式：${ctx.fetchMode}`);
   lines.push(`- 忽略/等待数量：${ignoredItems.length}`);
   lines.push("");
-  lines.push("| ID | 标题 | 处理 | 分类 | 原因 | 建议 |");
-  lines.push("| --- | --- | --- | --- | --- | --- |");
+  lines.push("| ID | 标题 | 记忆命中 | 修复资格 | 处理 | 分类 | 原因 | 建议 |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const bug of ignoredItems) {
-    lines.push(`| ${bug.id} | ${(bug.title || "").replace(/\|/g, "/")} | ${bug.handlingLabel || ""} (${bug.handlingAction || ""}) | ${bug.category || ""} | ${(bug.handlingReason || "").replace(/\|/g, "/")} | ${(bug.advice || "").replace(/\|/g, "/")} |`);
+    lines.push(`| ${bug.id} | ${(bug.title || "").replace(/\|/g, "/")} | ${compactMemoryText(bug)} | ${compactEligibilityText(bug)} | ${bug.handlingLabel || ""} (${bug.handlingAction || ""}) | ${bug.category || ""} | ${(bug.handlingReason || "").replace(/\|/g, "/")} | ${(bug.advice || "").replace(/\|/g, "/")} |`);
   }
   lines.push("");
 
@@ -1544,6 +1589,7 @@ function ignoredItemsReport(ctx, bugs, snapshotDir) {
     lines.push(`- 本轮处理：${bug.handlingLabel} (${bug.handlingAction})`);
     lines.push(`- 原因：${bug.handlingReason}`);
     lines.push(`- 建议：${bug.advice}`);
+    appendMemoryDetails(lines, bug);
     lines.push("");
     if (bug.reactivated) {
       lines.push("### 当前复测失败说明（优先）");
@@ -1887,6 +1933,13 @@ async function main() {
     if (!args.ids.length && (assignedIdSet || args.assignedTo)) {
       bugs = bugs.filter((bug) => assignedIdSet ? assignedIdSet.has(`${bug.id}`) : rowMatchesAssignedTo(bug, args));
     }
+
+    const memoryResult = enrichBugsWithMemory(bugs, ctx, {
+      enabled: args.memoryLink,
+      root: path.resolve(args.fixPatterns),
+    });
+    bugs = memoryResult.bugs;
+    ctx.memory = memoryResult.summary;
 
     const jsonPath = path.join(outRoot, "bugs.json");
     const mdPath = path.join(outRoot, "triage.md");
