@@ -4,7 +4,8 @@
 
 这是一个可移植的 Codex 配置包，包含：
 
-- 一组可直接安装到 Codex 的 `skills/`，当前同步 21 个本机自定义 skill
+- 一组可直接安装到 Codex 的 `skills/`，当前同步 22 个本机自定义 skill
+- 一行式主目录与按需领域目录 `skills-index/`
 - 可选 MCP 工具：CATStudio 在线日志准备、AbootDownload 安全烧录辅助、Everything 文件搜索、WeFlow 聊天导出辅助
 - 通用版 `AGENTS.md`，用于约束 Codex 如何按需使用 Obsidian Markdown 记忆库
 - 一个空的 Obsidian 记忆库模板，适合别人从零开始建立项目记忆
@@ -32,6 +33,14 @@
 ├── scripts/
 │   ├── install.ps1
 │   └── install.sh
+├── skills-index/
+│   ├── index.md
+│   ├── firmware/
+│   ├── zentao/
+│   ├── protocol/
+│   ├── logs/
+│   ├── release/
+│   └── memory/
 ├── mcp/
 │   ├── aboot-download/
 │   ├── catstudio-online-log/
@@ -42,8 +51,8 @@
 
 ## 当前同步快照
 
-- 更新时间：2026-07-15
-- Skills：21 个本机自定义 skill，未包含 Codex 内置 `.system` skill
+- 更新时间：2026-07-16
+- Skills：22 个本机自定义 skill，未包含 Codex 内置 `.system` skill
 - MCP：`aboot-download`、`catstudio-online-log`、`everything-search`、`weflow-export`
 - 未发布的本机 MCP：`node_repl` 属于 Codex App 内置运行时，不作为仓库 MCP 分发
 
@@ -64,10 +73,20 @@
 - 收紧自动修复门槛：同型号或同分支文本不能单独形成记忆命中；即使是高命中，也必须先核对当前代码、Git 历史和本地改动。
 - 新增离线边界测试，覆盖同项目高命中、跨项目移植、未命中和复测激活禁止直接修复。
 
+### 2026-07-16 更新
+
+- 全局 `AGENTS.md` 去项目化：只保留语言、长期记忆、隐私和通用路由原则；360x/禅道步骤下沉到项目本地上下文和 owning skill。
+- 新增 `asr360x-bug-delivery-orchestrator`，用本地断点状态编排深抓、修复、验证、逐 Bug 中文提交、记忆判断、禅道解决和显式发布。
+- `skill-usage-tracker` 改为按文件字节游标增量扫描，报告默认不重扫，并默认只统计真实 skill 读取/工具调用。
+- 跨分支 skill 新增 ordered cherry-pick Integration Mode；项目初始化新增 `--check`、`device.md` 和 `memory.md`。
+- CC Switch 增加 HTTP/SOCKS/WS/OAuth 分层诊断；ASR/ESP32 刷机统一增加目标设备身份预检。
+- 修复记忆新增“已验证/待复核”可信度更新，复测激活可降级旧模式而不删除历史。
+- 安装脚本同时安装一行式主索引和按需领域索引。
+
 <details>
 <summary>已同步 skills</summary>
 
-`aa-skill-router`, `akq-firmware-release`, `asr3601-bug-intake-orchestrator`, `asr3601-cross-branch-porting`, `asr3601-fix-closeout-reporter`, `asr3601-fix-verifier`, `asr3601-lvgl-firmware-triage`, `asr3601-project-onboard`, `asr3601-protocol-branch-matrix`, `asr3602-dump-firmware`, `asr3602-local-build-flash`, `asr360x-feature-closure-auditor`, `catstudio-log-extractor`, `catstudio-online-log`, `codex-ccswitch-mobile`, `codex-clash-proxy`, `esp32-c5-eim-jtag-flash`, `obsidian-fix-pattern-memory`, `skill-usage-tracker`, `zentao-bug-resolver`, `zentao-bug-triage`
+`aa-skill-router`, `akq-firmware-release`, `asr3601-bug-intake-orchestrator`, `asr3601-cross-branch-porting`, `asr3601-fix-closeout-reporter`, `asr3601-fix-verifier`, `asr3601-lvgl-firmware-triage`, `asr3601-project-onboard`, `asr3601-protocol-branch-matrix`, `asr3602-dump-firmware`, `asr3602-local-build-flash`, `asr360x-bug-delivery-orchestrator`, `asr360x-feature-closure-auditor`, `catstudio-log-extractor`, `catstudio-online-log`, `codex-ccswitch-mobile`, `codex-clash-proxy`, `esp32-c5-eim-jtag-flash`, `obsidian-fix-pattern-memory`, `skill-usage-tracker`, `zentao-bug-resolver`, `zentao-bug-triage`
 
 </details>
 

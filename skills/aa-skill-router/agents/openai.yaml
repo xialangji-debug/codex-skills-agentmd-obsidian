@@ -1,6 +1,6 @@
 interface:
   display_name: "技能路由器"
-  short_description: "把抓bug、协议、日志、收工等请求路由到正确技能"
-  default_prompt: "Use $aa-skill-router to route the user request to the right local Codex skill, project context, or skill index before acting."
+  short_description: "路由抓Bug、连续交付、移植、刷机和项目工作流"
+  default_prompt: "Use $aa-skill-router to route short local requests, including composite fix-commit-Zentao-release work, ordered integration, multi-device flash safety, and reference UI work."
 policy:
   allow_implicit_invocation: true

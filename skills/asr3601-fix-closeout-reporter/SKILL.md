@@ -54,6 +54,8 @@ python C:\Users\84365\.codex\skills\asr3601-fix-closeout-reporter\scripts\closeo
 6. Decide memory:
    - Write/update `Codex\fix-patterns\` through `obsidian-fix-pattern-memory` when the fix is a reusable pattern, regression, cross-branch port, protocol mismatch, or hard-won project lesson.
    - Do not write memory for one-off wording, temporary local setup, unsupported experiments, or fixes without verified reusable value.
+   - When a selected reusable note is supported by explicit target evidence, use `memory_trust.py verify` to record `已验证`, branch, commit, and evidence. A build alone must not claim device/platform verification.
+   - When a bug linked to an old fix-pattern is reactivated, use `memory_trust.py reactivate` to set that note to `待复核` before proposing reuse. Do not erase the historical fix.
 7. Prepare Zentao wording:
    - For code-fixed bugs, choose `已解决/fixed` and write a concise resolution note only if useful.
    - For platform/backend/app/test-environment issues, choose `外部原因/external` and include the evidence.

@@ -36,25 +36,6 @@ COMMON_SKILLS = [
     "plugin-creator",
     "skill-creator",
     "skill-installer",
-    "find-skills",
-    "karpathy-guidelines",
-    "mermaid-visualizer",
-    "pdf",
-    "playwright",
-    "playwright-interactive",
-    "screenshot",
-    "speech",
-    "transcribe",
-    "ui-ux-pro-max",
-    "yeet",
-    "understand",
-    "understand-chat",
-    "understand-dashboard",
-    "understand-diff",
-    "understand-domain",
-    "understand-explain",
-    "understand-knowledge",
-    "understand-onboard",
     "browser",
     "chrome",
     "documents",
@@ -83,7 +64,6 @@ TASK_ALIASES: dict[str, list[re.Pattern[str]]] = {
     "pdf": [re.compile(r"\.pdf\b", re.I)],
     "spreadsheets": [re.compile(r"\.xlsx\b", re.I), re.compile(r"\bExcel\b", re.I)],
     "presentations": [re.compile(r"\.pptx\b", re.I), re.compile(r"\bPPT\b", re.I), re.compile(r"PowerPoint", re.I)],
-    "screenshot": [re.compile(r"截图", re.I)],
     "imagegen": [re.compile(r"生成图片", re.I), re.compile(r"画一张", re.I), re.compile(r"做一张图", re.I)],
     "mermaid-visualizer": [re.compile(r"流程图", re.I), re.compile(r"```mermaid", re.I)],
     "speech": [re.compile(r"文字转语音", re.I), re.compile(r"配音", re.I)],
@@ -91,8 +71,6 @@ TASK_ALIASES: dict[str, list[re.Pattern[str]]] = {
 }
 
 COMMAND_EVIDENCE: dict[str, re.Pattern[str]] = {
-    "understand": re.compile(r"\.understand-anything|understand-anything|knowledge-graph\.json", re.I),
-    "playwright": re.compile(r"\bplaywright\b|playwright-cli", re.I),
     "pdf": re.compile(r"\b(pdfplumber|pypdf|reportlab|pdftoppm|pdftocairo)\b", re.I),
     "documents": re.compile(r"\b(render_docx\.py|python-docx)\b", re.I),
     "presentations": re.compile(r"\b(python-pptx|render_pptx)\b", re.I),
@@ -157,6 +135,14 @@ OTEL_NON_USAGE_STATUSES = {
     "skipped",
     "truncated",
 }
+
+ACTUAL_SIGNALS = (
+    "skill_md_read",
+    "plugin_tool_call",
+    "system_tool_call",
+    "official_otel_skill_injected",
+    "official_otel_skill_log",
+)
 
 RATING_ALIASES = {
     "useful": "useful",
@@ -256,6 +242,16 @@ def init_db(con: sqlite3.Connection) -> None:
         );
 
         create index if not exists idx_otel_metric_series on otel_metric_points(series_key, time_unix_nano);
+
+        create table if not exists session_scan_state (
+            source_file text primary key,
+            file_size integer not null,
+            mtime_ns integer not null,
+            byte_offset integer not null,
+            session_id text,
+            current_turn text,
+            updated_at text not null
+        );
         """
     )
     con.commit()
@@ -278,6 +274,18 @@ def discover_skills() -> list[str]:
     return sorted(skills, key=lambda value: (-len(value), value))
 
 
+def discover_scannable_skills() -> list[str]:
+    """Return active/system skills only; plugin calls are detected by tool namespace."""
+    skills = set(COMMON_SKILLS)
+    root = CODEX_HOME / "skills"
+    if root.exists():
+        for skill_md in root.rglob("SKILL.md"):
+            name = skill_md.parent.name.strip().lower()
+            if name:
+                skills.add(name)
+    return sorted(skills, key=lambda value: (-len(value), value))
+
+
 def discover_skill_md_paths(skills: Iterable[str]) -> list[tuple[str, str]]:
     known = set(skills)
     paths: list[tuple[str, str]] = []
@@ -293,6 +301,19 @@ def discover_skill_md_paths(skills: Iterable[str]) -> list[tuple[str, str]]:
             name = skill_md.parent.name.strip().lower()
             if name in known:
                 paths.append((name, normalize_path(skill_md)))
+    return paths
+
+
+def discover_active_skill_md_paths(skills: Iterable[str]) -> list[tuple[str, str]]:
+    known = set(skills)
+    root = CODEX_HOME / "skills"
+    if not root.exists():
+        return []
+    paths: list[tuple[str, str]] = []
+    for skill_md in root.rglob("SKILL.md"):
+        name = skill_md.parent.name.strip().lower()
+        if name in known:
+            paths.append((name, normalize_path(skill_md)))
     return paths
 
 
@@ -355,6 +376,10 @@ def should_skip_tool_payload(text: str) -> bool:
         "TASK_ALIASES",
         "scan_sessions(",
         "discover_skill_md_paths(",
+        "<skills_instructions>",
+        "### Available skills",
+        "base_instructions",
+        "dynamic_tools",
     ]
     return any(marker in normalized for marker in markers)
 
@@ -457,23 +482,79 @@ def iter_session_files() -> Iterable[Path]:
         yield from root.rglob("*.jsonl")
 
 
-def scan_sessions(since: str | None = None) -> list[dict[str, Any]]:
-    skills = discover_skills()
-    skill_md_paths = discover_skill_md_paths(skills)
+def scan_sessions(
+    con: sqlite3.Connection,
+    since: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    skills = discover_scannable_skills()
+    skill_md_paths = discover_active_skill_md_paths(skills)
     events: list[dict[str, Any]] = []
+    state_updates: list[dict[str, Any]] = []
+    reset_sources: list[str] = []
+
+    state_rows = {
+        row["source_file"]: row
+        for row in con.execute("select * from session_scan_state")
+    }
+
+    since_epoch: float | None = None
+    if since:
+        try:
+            since_epoch = dt.datetime.fromisoformat(since.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            since_epoch = None
 
     for file_path in iter_session_files():
-        session_id = ""
-        current_turn = ""
+        source_file = str(file_path)
         try:
-            handle = file_path.open("r", encoding="utf-8", errors="replace")
+            stat = file_path.stat()
+        except OSError:
+            continue
+        previous = state_rows.get(source_file)
+        if previous and stat.st_size == previous["file_size"] and stat.st_mtime_ns == previous["mtime_ns"]:
+            continue
+
+        start_offset = int(previous["byte_offset"] or 0) if previous else 0
+        session_id = (previous["session_id"] or "") if previous else ""
+        current_turn = (previous["current_turn"] or "") if previous else ""
+        if start_offset > stat.st_size or (previous and stat.st_size == previous["file_size"] and stat.st_mtime_ns != previous["mtime_ns"]):
+            start_offset = 0
+            session_id = ""
+            current_turn = ""
+            reset_sources.append(source_file)
+
+        if not previous and since_epoch is not None and stat.st_mtime < since_epoch:
+            state_updates.append({
+                "source_file": source_file,
+                "file_size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+                "byte_offset": stat.st_size,
+                "session_id": "",
+                "current_turn": "",
+                "updated_at": utc_now(),
+            })
+            continue
+
+        try:
+            handle = file_path.open("rb")
         except OSError:
             continue
         with handle:
-            for line in handle:
+            handle.seek(start_offset)
+            completed_offset = start_offset
+            while True:
+                line_start = handle.tell()
+                raw_line = handle.readline()
+                if not raw_line:
+                    break
+                if not raw_line.endswith(b"\n"):
+                    handle.seek(line_start)
+                    break
+                completed_offset = handle.tell()
                 try:
+                    line = raw_line.decode("utf-8", errors="replace")
                     obj = json.loads(line)
-                except json.JSONDecodeError:
+                except (UnicodeError, json.JSONDecodeError):
                     continue
                 timestamp = obj.get("timestamp") or ""
                 if since and timestamp and timestamp < since:
@@ -664,10 +745,51 @@ def scan_sessions(since: str | None = None) -> list[dict[str, Any]]:
                             snippet=text,
                         )
 
-    return events
+        state_updates.append({
+            "source_file": source_file,
+            "file_size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+            "byte_offset": completed_offset,
+            "session_id": session_id,
+            "current_turn": current_turn,
+            "updated_at": utc_now(),
+        })
+
+    return events, state_updates, reset_sources
 
 
-def store_events(con: sqlite3.Connection, events: list[dict[str, Any]]) -> tuple[int, int]:
+def store_scan_state(
+    con: sqlite3.Connection,
+    state_updates: list[dict[str, Any]],
+    reset_sources: list[str],
+) -> None:
+    for source_file in reset_sources:
+        con.execute("delete from usage_events where source_file = ?", (source_file,))
+    con.executemany(
+        """
+        insert into session_scan_state (
+            source_file, file_size, mtime_ns, byte_offset, session_id, current_turn, updated_at
+        ) values (
+            :source_file, :file_size, :mtime_ns, :byte_offset, :session_id, :current_turn, :updated_at
+        )
+        on conflict(source_file) do update set
+            file_size=excluded.file_size,
+            mtime_ns=excluded.mtime_ns,
+            byte_offset=excluded.byte_offset,
+            session_id=excluded.session_id,
+            current_turn=excluded.current_turn,
+            updated_at=excluded.updated_at
+        """,
+        state_updates,
+    )
+
+
+def store_events(
+    con: sqlite3.Connection,
+    events: list[dict[str, Any]],
+    *,
+    commit: bool = True,
+) -> tuple[int, int]:
     inserted = 0
     for event in events:
         before = con.total_changes
@@ -685,7 +807,8 @@ def store_events(con: sqlite3.Connection, events: list[dict[str, Any]]) -> tuple
         )
         if con.total_changes > before:
             inserted += 1
-    con.commit()
+    if commit:
+        con.commit()
     return inserted, len(events)
 
 
@@ -961,7 +1084,12 @@ def sync_usage(con: sqlite3.Connection, args: argparse.Namespace) -> tuple[int, 
         inserted += new_inserted
         total += new_total
     if use_logs:
-        new_inserted, new_total = store_events(con, scan_sessions(since=since))
+        events, state_updates, reset_sources = scan_sessions(con, since=since)
+        for source_file in reset_sources:
+            con.execute("delete from usage_events where source_file = ?", (source_file,))
+        new_inserted, new_total = store_events(con, events, commit=False)
+        store_scan_state(con, state_updates, [])
+        con.commit()
         inserted += new_inserted
         total += new_total
     return inserted, total
@@ -981,6 +1109,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
     if args.rebuild:
         con.execute("delete from usage_events")
         con.execute("delete from otel_metric_points")
+        con.execute("delete from session_scan_state")
         con.commit()
     inserted, total = sync_usage(con, args)
     print(f"Source: {args.source}")
@@ -989,9 +1118,19 @@ def cmd_scan(args: argparse.Namespace) -> None:
     print(f"Database: {args.db}")
 
 
-def usage_rows(con: sqlite3.Connection, limit: int, source: str = "auto") -> list[sqlite3.Row]:
+def usage_rows(
+    con: sqlite3.Connection,
+    limit: int,
+    source: str = "auto",
+    *,
+    include_inferred: bool = False,
+) -> list[sqlite3.Row]:
     source_where = source_predicate(source)
-    usage_where = f"where {source_where}" if source_where else ""
+    predicates = [source_where] if source_where else []
+    if not include_inferred:
+        quoted = ",".join(f"'{signal}'" for signal in ACTUAL_SIGNALS)
+        predicates.append(f"signal in ({quoted})")
+    usage_where = f"where {' and '.join(predicates)}" if predicates else ""
     return list(
         con.execute(
             f"""
@@ -1042,9 +1181,9 @@ def usage_rows(con: sqlite3.Connection, limit: int, source: str = "auto") -> lis
 
 def cmd_report(args: argparse.Namespace) -> None:
     con = connect(args.db)
-    if not args.no_scan:
+    if args.scan:
         sync_usage(con, args)
-    rows = usage_rows(con, args.limit, args.source)
+    rows = usage_rows(con, args.limit, args.source, include_inferred=args.include_inferred)
     if args.json:
         print(json.dumps([dict(row) for row in rows], ensure_ascii=False, indent=2))
         return
@@ -1075,7 +1214,13 @@ def cmd_report(args: argparse.Namespace) -> None:
     print("Overall turn feedback is not copied to every skill unless skill-level feedback is explicit.")
 
 
-def skill_trend_rows(con: sqlite3.Connection, now: dt.datetime, source: str = "auto") -> tuple[list[dict[str, Any]], dict[str, str]]:
+def skill_trend_rows(
+    con: sqlite3.Connection,
+    now: dt.datetime,
+    source: str = "auto",
+    *,
+    include_inferred: bool = False,
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
     cut7 = iso_days_ago(now, 7)
     cut14 = iso_days_ago(now, 14)
     cut30 = iso_days_ago(now, 30)
@@ -1088,7 +1233,11 @@ def skill_trend_rows(con: sqlite3.Connection, now: dt.datetime, source: str = "a
         "cutoff_prev_30d": cut60,
     }
     source_where = source_predicate(source)
-    usage_where = f"where {source_where}" if source_where else ""
+    predicates = [source_where] if source_where else []
+    if not include_inferred:
+        quoted = ",".join(f"'{signal}'" for signal in ACTUAL_SIGNALS)
+        predicates.append(f"signal in ({quoted})")
+    usage_where = f"where {' and '.join(predicates)}" if predicates else ""
     raw_rows = list(
         con.execute(
             f"""
@@ -1258,10 +1407,10 @@ def print_cleanup_section(cleanup: dict[str, list[dict[str, Any]]], stale_days: 
 
 def cmd_trends(args: argparse.Namespace) -> None:
     con = connect(args.db)
-    if not args.no_scan:
+    if args.scan:
         sync_usage(con, args)
     now = dt.datetime.now(dt.timezone.utc)
-    rows, windows = skill_trend_rows(con, now, args.source)
+    rows, windows = skill_trend_rows(con, now, args.source, include_inferred=args.include_inferred)
     active_rows = [row for row in rows if row["total_signals"] > 0]
     active_rows.sort(key=trend_sort_key)
     cleanup = cleanup_suggestions(rows, stale_days=args.stale_days, now=now, limit=args.cleanup_limit)
@@ -1342,7 +1491,7 @@ def latest_turns(con: sqlite3.Connection, limit: int, pending_only: bool = False
 
 def cmd_latest(args: argparse.Namespace) -> None:
     con = connect(args.db)
-    if not args.no_scan:
+    if args.scan:
         sync_usage(con, args)
     rows = latest_turns(con, args.limit, source=args.source)
     print("Latest detected skill-use turns")
@@ -1353,7 +1502,7 @@ def cmd_latest(args: argparse.Namespace) -> None:
 
 def cmd_pending(args: argparse.Namespace) -> None:
     con = connect(args.db)
-    if not args.no_scan:
+    if args.scan:
         sync_usage(con, args)
     rows = latest_turns(con, args.limit, pending_only=True, source=args.source)
     print("Turns with detected skill usage and no turn-level feedback")
@@ -1528,7 +1677,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db", type=Path, default=DB_PATH, help="SQLite database path")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    def add_source_args(command: argparse.ArgumentParser, *, include_no_scan: bool = False) -> None:
+    def add_source_args(command: argparse.ArgumentParser, *, include_scan_toggle: bool = False) -> None:
         command.add_argument(
             "--source",
             choices=["auto", "official", "logs", "both"],
@@ -1536,8 +1685,11 @@ def build_parser() -> argparse.ArgumentParser:
             help="Usage source: official OTel JSONL, legacy session logs, both, or auto",
         )
         command.add_argument("--otel-file", type=Path, default=OTEL_JSONL_PATH, help="Official OTLP JSONL capture path")
-        if include_no_scan:
-            command.add_argument("--no-scan", action="store_true", help="Do not scan/import before reporting")
+        if include_scan_toggle:
+            scan_group = command.add_mutually_exclusive_group()
+            scan_group.add_argument("--scan", action="store_true", help="Incrementally scan/import before reporting")
+            scan_group.add_argument("--no-scan", action="store_false", dest="scan", help=argparse.SUPPRESS)
+            command.set_defaults(scan=False)
 
     scan = sub.add_parser("scan", help="Scan Codex session logs into the local database")
     scan.add_argument("--since", help="Only scan events at or after this ISO timestamp")
@@ -1548,8 +1700,9 @@ def build_parser() -> argparse.ArgumentParser:
     report = sub.add_parser("report", help="Show skill usage report")
     report.add_argument("--limit", type=int, default=30)
     report.add_argument("--since", help="Only scan events at or after this ISO timestamp before reporting")
-    add_source_args(report, include_no_scan=True)
+    add_source_args(report, include_scan_toggle=True)
     report.add_argument("--json", action="store_true", help="Emit JSON")
+    report.add_argument("--include-inferred", action="store_true", help="Include inferred command evidence and name mentions")
     report.set_defaults(func=cmd_report)
 
     trends = sub.add_parser("trends", help="Show 7/30 day trends and unused-skill cleanup suggestions")
@@ -1557,20 +1710,21 @@ def build_parser() -> argparse.ArgumentParser:
     trends.add_argument("--cleanup-limit", type=int, default=20)
     trends.add_argument("--stale-days", type=int, default=30, help="Days without detected use before suggesting review")
     trends.add_argument("--since", help="Only scan events at or after this ISO timestamp before reporting")
-    add_source_args(trends, include_no_scan=True)
+    add_source_args(trends, include_scan_toggle=True)
     trends.add_argument("--json", action="store_true", help="Emit JSON")
+    trends.add_argument("--include-inferred", action="store_true", help="Include inferred command evidence and name mentions")
     trends.set_defaults(func=cmd_trends)
 
     latest = sub.add_parser("latest", help="Show latest turns with skill usage")
     latest.add_argument("--limit", type=int, default=10)
     latest.add_argument("--since", help="Only scan events at or after this ISO timestamp before reporting")
-    add_source_args(latest, include_no_scan=True)
+    add_source_args(latest, include_scan_toggle=True)
     latest.set_defaults(func=cmd_latest)
 
     pending = sub.add_parser("pending", help="Show turns that have skill usage but no turn feedback")
     pending.add_argument("--limit", type=int, default=10)
     pending.add_argument("--since", help="Only scan events at or after this ISO timestamp before reporting")
-    add_source_args(pending, include_no_scan=True)
+    add_source_args(pending, include_scan_toggle=True)
     pending.set_defaults(func=cmd_pending)
 
     feedback = sub.add_parser("feedback", help="Record feedback for a turn and optionally specific skills")

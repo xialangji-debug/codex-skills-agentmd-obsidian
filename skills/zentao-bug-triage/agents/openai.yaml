@@ -1,6 +1,6 @@
 interface:
   display_name: "禅道Bug分拣"
-  short_description: "当前Bug分拣、记忆匹配和修复资格判断"
-  default_prompt: "Use $zentao-bug-triage in ASR3601/ASR3602 Crane/LVGL firmware workspaces when asked to check current bugs: fetch Zentao bugs for the current branch, link each bug to verified fix-pattern memory with high/medium/low/no-match evidence, assign conservative repair eligibility, split items into work-items.md and ignored-items.md, open selected details, parse latest reactivation notes, download attachments, inspect current code and git history before editing, and report whether each issue exists or was already fixed."
+  short_description: "只抓当前激活Bug并分拣、匹配记忆和判断修复资格"
+  default_prompt: "Use $zentao-bug-triage in ASR3601/ASR3602 Crane/LVGL firmware workspaces to fetch only active Zentao bugs for the current branch by default, download their details and attachments, classify repair eligibility, and inspect selected items before editing."
 policy:
   allow_implicit_invocation: true

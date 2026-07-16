@@ -17,6 +17,7 @@ Use this skill to turn Zentao bugs into a branch-aware triage table before editi
 - Never mark list-only, reactivated, platform/backend, low-level/hardware/driver, or log-dependent-without-evidence bugs as direct repair candidates.
 - Do not directly handle low-level hardware/driver/power/modem/platform-server bugs. Give evidence, needed logs, and a suggested owner/debug path.
 - Use current-project fetching by default in firmware workspaces: resolve the branch/version through `references/project-map.md`, fetch that Zentao project, and fall back to assigned bugs when no confirmed mapping exists, when project ID discovery fails, or when the project/list page returns zero rows.
+- Fetch only bugs whose Zentao status is `active` by default. Do not fetch detail pages or attachments for `resolved` or `closed` bugs unless the user explicitly asks for all, resolved, closed, historical, or regression-review data.
 - For current-branch bug fetching, trust only the current Git worktree and branch from `--repo`; do not infer the branch from browser state, an old snapshot, Obsidian memory, or another worktree. In multi-worktree folders, pass `--expect-repo-name` and `--expect-branch` so the script aborts before opening Zentao if the working directory is wrong.
 - By default, open the detail page for every fetched bug and download every attachment. Do not use the fast list mode unless the user explicitly asks for a fast/no-attachment listing.
 - If a full detail/attachment fetch times out, retry with a longer timeout or higher detail concurrency, or split the same bug IDs into smaller deep-fetch batches and preserve all downloaded evidence. Never fall back to `--detail-limit 0` or `--no-download-attachments`, and never present a list-only snapshot as the completed result, unless the user explicitly requested a fast/no-attachment listing.
@@ -57,21 +58,21 @@ $env:NODE_PATH="$env:USERPROFILE\.cache\codex-runtimes\codex-primary-runtime\dep
 $repoRoot = git rev-parse --show-toplevel
 $repoName = Split-Path -Leaf $repoRoot
 $branch = git branch --show-current
-node "$env:USERPROFILE\.codex\skills\zentao-bug-triage\scripts\zentao_bug_snapshot.js" --repo . --expect-repo-name "$repoName" --expect-branch "$branch" --limit 80 --detail-concurrency 4 --download-attachments
+node "$env:USERPROFILE\.codex\skills\zentao-bug-triage\scripts\zentao_bug_snapshot.js" --repo . --expect-repo-name "$repoName" --expect-branch "$branch" --bug-status active --limit 80 --detail-concurrency 4 --download-attachments
 ```
 
-   - The script reads `references/project-map.md`, matches `git branch --show-current` plus `yl_device_ver`, loads/saves a local project-id cache, discovers the Zentao project ID from `project-browse.html`/`program-browse.html`, fetches `project-bug-<id>.html`, records the selected project in the snapshot, and automatically falls back to assigned bugs when no confirmed mapping matches, project ID discovery fails, or the project/list page returns zero rows.
+   - The script reads `references/project-map.md`, matches `git branch --show-current` plus `yl_device_ver`, loads/saves a local project-id cache, discovers the Zentao project ID from `project-browse.html`/`program-browse.html`, fetches the active tab of `project-bug-<id>.html`, records the selected project in the snapshot, and automatically falls back to active assigned bugs when no confirmed mapping matches, project ID discovery fails, or the project/list page returns zero rows.
    - When this assigned fallback is used for a mapped current project, the script deep-fetches candidate assigned rows and keeps only bugs whose detail page product matches the mapped project. Do not treat the first empty project table as “no bugs” unless the fallback is also empty.
-   - `--limit` controls how many list rows to capture. By default every captured row opens its detail page and downloads attachments. `--detail-limit` may lower that count only for an explicitly requested fast list. `--detail-concurrency` defaults to 4 and opens detail pages in parallel with independent pages sharing the authenticated session.
-   - Use `--bug-status unresolved` to fetch the project’s unresolved/active bug tab first when the user asks what still needs fixing.
-   - Only when the user explicitly asks for a fast current-unresolved list without detail pages:
+   - `--limit` controls how many active list rows to capture. By default every captured active row opens its detail page and downloads attachments. `--detail-limit` may lower that count only for an explicitly requested fast list. `--detail-concurrency` defaults to 4 and opens detail pages in parallel with independent pages sharing the authenticated session.
+   - The script defaults to `--bug-status active`. Use `--bug-status all`, `resolved`, or `closed` only when the user explicitly requests those statuses.
+   - Only when the user explicitly asks for a fast current-active list without detail pages:
 
 ```powershell
 $env:NODE_PATH="$env:USERPROFILE\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules;$env:USERPROFILE\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\.pnpm\node_modules"
 $repoRoot = git rev-parse --show-toplevel
 $repoName = Split-Path -Leaf $repoRoot
 $branch = git branch --show-current
-node "$env:USERPROFILE\.codex\skills\zentao-bug-triage\scripts\zentao_bug_snapshot.js" --repo . --expect-repo-name "$repoName" --expect-branch "$branch" --bug-status unresolved --detail-limit 0 --no-download-attachments
+node "$env:USERPROFILE\.codex\skills\zentao-bug-triage\scripts\zentao_bug_snapshot.js" --repo . --expect-repo-name "$repoName" --expect-branch "$branch" --bug-status active --detail-limit 0 --no-download-attachments
 ```
 
    - When the user wants only the current branch/product bugs that are assigned to the current Zentao account and still active, use:
@@ -100,13 +101,14 @@ node "$env:USERPROFILE\.codex\skills\zentao-bug-triage\scripts\zentao_bug_snapsh
      - `work-items.md`: bugs Codex should inspect/fix next, candidate fix-pattern paths/evidence, mandatory pre-edit checks, and candidate bugs that have a clear expected result or attachment evidence.
      - `ignored-items.md`: bugs to skip this round, wait for logs/confirmation, or send to platform/driver/hardware owners.
    - Memory linkage is read-only and enabled by default. It indexes Markdown under `%USERPROFILE%\Documents\Obsidian\CodexVault\Codex\fix-patterns`, keeps at most three candidates per bug, and emits `高` / `中` / `低` / `未命中`. Use `--fix-patterns <path>` to override the folder or `--no-memory-link` for an isolated run.
+   - Treat `product`, branch, repo, device name, and version only as context filters. Never mix them into symptom fingerprints or score `LT52`, `小程序`, `物卡`, `公版`, branch fragments, placeholder detail, or Chinese sliding-window fragments as issue evidence.
    - A high match requires an already verified note plus multiple evidence dimensions and a same-project or code-symbol signal. Same device/branch text alone must not produce a match.
    - The deep-fetch command fills `work-items.md` with full detail, history records, latest activation note, and attachment paths. Before later fixing “这些bug”, read the latest or user-specified `work-items.md` first and base the fix on its detail fields and attachments.
    - For bugs assigned to the user regardless of project:
 
 ```powershell
 $env:NODE_PATH="$env:USERPROFILE\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules;$env:USERPROFILE\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\.pnpm\node_modules"
-node "$env:USERPROFILE\.codex\skills\zentao-bug-triage\scripts\zentao_bug_snapshot.js" --repo . --assigned --limit 80
+node "$env:USERPROFILE\.codex\skills\zentao-bug-triage\scripts\zentao_bug_snapshot.js" --repo . --assigned --bug-status active --limit 80
 ```
 
    - For a specific Zentao product/project, pass `--project-id`, `--project-name`, or `--project-key` after confirming the mapping.

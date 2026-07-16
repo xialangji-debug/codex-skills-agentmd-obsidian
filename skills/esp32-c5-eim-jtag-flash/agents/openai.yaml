@@ -1,4 +1,4 @@
 interface:
   display_name: "ESP32-C5 EIM JTAG Flash"
   short_description: "ESP32-C5 EIM flash with JTAG fallback"
-  default_prompt: "Use $esp32-c5-eim-jtag-flash to build and flash the ESP32-C5 project, falling back to OpenOCD/JTAG when UART flashing fails."
+  default_prompt: "Use $esp32-c5-eim-jtag-flash to verify the connected target is ESP32-C5, build with EIM, and flash through UART or OpenOCD/JTAG fallback without selecting an attached ASR device."

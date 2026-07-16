@@ -1,4 +1,4 @@
 interface:
   display_name: "Obsidian Fix Memory"
-  short_description: "Write reusable firmware fix-pattern notes"
-  default_prompt: "Use $obsidian-fix-pattern-memory to search or update reusable fix-pattern notes."
+  short_description: "维护可复用修复记忆及已验证或待复核可信度"
+  default_prompt: "Use $obsidian-fix-pattern-memory to search, write, verify, or downgrade one reusable fix-pattern note based on explicit evidence or a reactivated bug."

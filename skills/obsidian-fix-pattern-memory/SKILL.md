@@ -1,6 +1,6 @@
 ---
 name: obsidian-fix-pattern-memory
-description: Search, create, and update the user's local Obsidian Markdown fix-pattern memory at C:\Users\84365\Documents\Obsidian\CodexVault\Codex. Use when the user says "读取记忆库", "记一下", "收工更新", "fix-pattern", "类似问题", "回归", "跨分支", asks to preserve reusable project knowledge, or after a reusable ASR3601/Crane/LVGL firmware fix should be recorded with time, project path, branch, short commit, source/target branch, and validation status.
+description: Search, create, update, and maintain trust state for local Obsidian Markdown fix-pattern memory. Use for 读取记忆库, 记一下, 收工更新, fix-pattern, 类似问题, 回归, 跨分支, reusable firmware fixes, verified evidence that should raise a note to 已验证, or reactivated bugs that must downgrade an old fix pattern to 待复核.
 ---
 
 # Obsidian Fix Pattern Memory
@@ -45,6 +45,7 @@ Always include:
 来源分支：
 目标分支：
 验证状态：已验证 / 未验证 / 仅推测
+可信度：高 / 中 / 低 / 待复核
 ```
 
 If the current directory is not a Git repository, write `不可用` for branch and commit.
@@ -111,6 +112,20 @@ python C:\Users\84365\.codex\skills\obsidian-fix-pattern-memory\scripts\new_fix_
 ```
 
 It fills current time, cwd, Git branch, and short commit. Edit the generated Markdown with the actual symptom, root cause, files, fix, validation, and caveats.
+
+Use the trust updater only after selecting one concrete note and reviewing evidence:
+
+```powershell
+python C:\Users\84365\.codex\skills\obsidian-fix-pattern-memory\scripts\memory_trust.py verify `
+  --note <fix-pattern.md> --evidence "target build and device regression passed" --write
+
+python C:\Users\84365\.codex\skills\obsidian-fix-pattern-memory\scripts\memory_trust.py reactivate `
+  --note <fix-pattern.md> --bug 2935 --evidence "tester reactivated on current build" --write
+```
+
+- `verify` requires explicit verification evidence and records current repo/branch/commit when available.
+- `reactivate` sets `验证状态` and `可信度` to `待复核`; it never deletes historical fix content.
+- Run without `--write` to preview. Never bulk-upgrade notes from build success alone.
 
 ## Final Report
 

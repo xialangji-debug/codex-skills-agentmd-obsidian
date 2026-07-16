@@ -1,6 +1,6 @@
 ---
 name: asr3601-project-onboard
-description: Initialize or refresh local project context and a canonical variant fingerprint for ASR3601/ASR3602/360x/Crane/LVGL firmware repositories. Use when the user asks 初始化当前 360x 项目上下文, 生成项目 AGENTS, 新项目接入 Codex, 当前工程怎么配置, 记录这个项目编译命令, 生成变体指纹, project onboarding, or when a new firmware checkout needs project-level AGENTS.md, .codex-project index/build/zentao/protocol/variant files, and local git exclude entries.
+description: Initialize, refresh, or check local project context and a canonical variant fingerprint for ASR3601/ASR3602/360x/Crane/LVGL firmware repositories. Use for 初始化当前 360x 项目上下文, 生成项目 AGENTS, 新项目接入 Codex, 记录编译命令, 生成变体指纹, 检查上下文是否过期, project onboarding, or when a checkout needs project-level index/build/zentao/protocol/variant/device/memory files and local git exclude entries.
 ---
 
 # ASR3601 Project Onboard
@@ -33,11 +33,14 @@ AGENTS.md
 .codex-project\build.md
 .codex-project\protocol.md
 .codex-project\variant.md
+.codex-project\device.md
+.codex-project\memory.md
 ```
 
 5. Add these local context files to `.git\info\exclude` so they do not pollute source commits.
 6. Treat `.codex-project\variant.md` as the canonical preflight fingerprint for every ASR bug, port, verification, build, release, protocol, and Zentao workflow. It must include repo, branch, commit, dirty state, `yl_device_ver`, chip, OS, protocol, customer/product variant, build parameters, and Zentao mapping.
-7. In the completion response, provide clickable absolute Markdown links for `AGENTS.md` and every generated `.codex-project` file. When a protocol document is mapped, also provide clickable links to its original and searchable extracted file.
+7. Keep live device-selection rules in `.codex-project\device.md`; never persist a COM number as identity. Keep project-specific fix-pattern aliases in `.codex-project\memory.md`.
+8. In the completion response, provide clickable absolute Markdown links for `AGENTS.md` and every generated `.codex-project` file. When a protocol document is mapped, also provide clickable links to its original and searchable extracted file.
 
 ## Script
 
@@ -53,6 +56,7 @@ Useful options:
 python "$env:USERPROFILE\.codex\skills\asr3601-project-onboard\scripts\project_onboard.py" --repo C:\Users\84365\Desktop\inside\lt52_XCX_GB --dry-run
 python "$env:USERPROFILE\.codex\skills\asr3601-project-onboard\scripts\project_onboard.py" --repo . --write --force
 python "$env:USERPROFILE\.codex\skills\asr3601-project-onboard\scripts\project_onboard.py" --repo . --write --no-exclude
+python "$env:USERPROFILE\.codex\skills\asr3601-project-onboard\scripts\project_onboard.py" --repo . --check
 ```
 
 ## Defaults

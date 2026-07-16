@@ -235,6 +235,30 @@ def extract_route_references(index_path: Path) -> tuple[list[RouteReference], li
     return routes, []
 
 
+def extract_disabled_references(index_path: Path) -> tuple[list[RouteReference], list[str]]:
+    if not index_path.exists():
+        return [], [f"missing index: {index_path}"]
+    try:
+        lines = index_path.read_text(encoding="utf-8-sig").splitlines()
+    except (OSError, UnicodeError) as exc:
+        return [], [f"cannot read index {index_path}: {exc}"]
+
+    references: list[RouteReference] = []
+    for line_number, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not (stripped.startswith("|") and stripped.endswith("|")):
+            continue
+        if not any(marker in line.lower() for marker in NON_ROUTE_MARKERS):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        for token in BACKTICK_TOKEN_RE.findall(cells[1]):
+            if token.lower() not in IGNORED_ROUTE_TOKENS and "." not in token:
+                references.append(RouteReference(name=token, line=line_number, text=line.strip()))
+    return references, []
+
+
 def _casefold_map(names: Iterable[str]) -> dict[str, str]:
     result: dict[str, str] = {}
     for name in names:
@@ -274,6 +298,7 @@ def build_audit(args: argparse.Namespace) -> dict[str, Any]:
     plugin_records, plugin_errors = discover_plugin_records(args.plugin_cache)
     available_names, available_errors = read_available_names(args.available_names_file)
     route_refs, index_errors = extract_route_references(args.index)
+    disabled_refs, disabled_index_errors = extract_disabled_references(args.index)
 
     active_names = {record.name for record in active_records}
     disabled_names = {record.name for record in disabled_records}
@@ -287,6 +312,7 @@ def build_audit(args: argparse.Namespace) -> dict[str, Any]:
     missing_routes: list[dict[str, Any]] = []
     valid_routes: list[dict[str, Any]] = []
     suggestions: list[str] = []
+    stale_disabled_records: list[dict[str, Any]] = []
 
     for route in route_refs:
         key = route.name.casefold()
@@ -320,6 +346,12 @@ def build_audit(args: argparse.Namespace) -> dict[str, Any]:
         key=str.lower,
     )
 
+    for route in disabled_refs:
+        if route.name.casefold() in disabled_map:
+            continue
+        stale_disabled_records.append(asdict(route))
+        suggestions.append(f"L{route.line}: remove stale disabled record `{route.name}`")
+
     frontmatter_issues = [
         {
             "name": record.name,
@@ -332,7 +364,7 @@ def build_audit(args: argparse.Namespace) -> dict[str, Any]:
     ]
 
     duplicates = _duplicates([*active_records, *disabled_records, *plugin_records])
-    invalid = [*active_invalid, *disabled_invalid, *plugin_errors, *available_errors, *index_errors]
+    invalid = [*active_invalid, *disabled_invalid, *plugin_errors, *available_errors, *index_errors, *disabled_index_errors]
 
     return {
         "mode": "read-only",
@@ -354,6 +386,7 @@ def build_audit(args: argparse.Namespace) -> dict[str, Any]:
             "frontmatter_issues": len(frontmatter_issues),
             "invalid": len(invalid),
             "unindexed_active": len(unindexed_active),
+            "stale_disabled_records": len(stale_disabled_records),
         },
         "active": sorted(active_names, key=str.lower),
         "disabled": sorted(disabled_names, key=str.lower),
@@ -365,6 +398,7 @@ def build_audit(args: argparse.Namespace) -> dict[str, Any]:
         "frontmatter_issues": frontmatter_issues,
         "invalid": invalid,
         "unindexed_active": unindexed_active,
+        "stale_disabled_records": stale_disabled_records,
         "patch_suggestions": sorted(set(suggestions)),
     }
 
@@ -417,6 +451,10 @@ def print_text_report(report: dict[str, Any]) -> None:
         ],
     )
     _print_items("Unindexed active skills", report["unindexed_active"])
+    _print_items(
+        "Stale disabled index records",
+        [f"L{item['line']} `{item['name']}`" for item in report["stale_disabled_records"]],
+    )
     _print_items("Patch suggestions (review before editing)", report["patch_suggestions"])
     print("\nNo files were changed.")
 
@@ -436,6 +474,7 @@ def run(args: argparse.Namespace) -> int:
             + summary["duplicates"]
             + summary["frontmatter_issues"]
             + summary["invalid"]
+            + summary["stale_disabled_records"]
         )
         return 2 if blocking else 0
     return 0

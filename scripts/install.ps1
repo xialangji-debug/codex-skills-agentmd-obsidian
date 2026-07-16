@@ -12,6 +12,7 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $SkillsSource = Join-Path $RepoRoot "skills"
+$SkillsIndexSource = Join-Path $RepoRoot "skills-index"
 $McpSource = Join-Path $RepoRoot "mcp"
 $AgentsSource = Join-Path $RepoRoot "AGENTS.md"
 $ObsidianSource = Join-Path $RepoRoot "obsidian\Codex"
@@ -182,6 +183,11 @@ if (-not $SkipSkills) {
   New-Item -ItemType Directory -Path $skillsDest -Force | Out-Null
   Copy-DirectoryContents -Source $SkillsSource -Destination $skillsDest -Overwrite
   Write-Host "Installed skills to $skillsDest"
+  if (Test-Path -LiteralPath $SkillsIndexSource) {
+    $skillsIndexDest = Join-Path $CodexHome "skills-index"
+    Copy-DirectoryContents -Source $SkillsIndexSource -Destination $skillsIndexDest -Overwrite
+    Write-Host "Installed one-line/domain skill indexes to $skillsIndexDest"
+  }
 }
 
 Install-McpTools

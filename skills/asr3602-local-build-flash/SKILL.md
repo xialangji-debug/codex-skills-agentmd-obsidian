@@ -38,6 +38,7 @@ Use this skill for a local build/flash loop only. It compiles the current firmwa
    - Treat `*_source.zip` as not flashable unless the user explicitly asks for source packaging.
 
 4. Flash when requested:
+   - Run the shared `aa-skill-router/scripts/embedded_target_preflight.ps1` first. Require project/artifact/CHIP_ID/USB identity agreement; COM alone is insufficient.
    - Prefer an exposed aboot/download MCP if available in the current session.
    - If no MCP is exposed, use local `adownload.exe` fallback.
    - Use a confirmed ASR modem/download COM port. Do not use Bluetooth serial ports.

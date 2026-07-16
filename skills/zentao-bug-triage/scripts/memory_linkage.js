@@ -3,17 +3,25 @@
 const fs = require("fs");
 const path = require("path");
 
-const DOMAIN_TERMS = [
+const ISSUE_DOMAIN_TERMS = [
   "云相册", "联系人", "白名单", "通讯录", "微聊", "微信支付", "扫码", "定位", "gps",
   "课堂模式", "免打扰", "闹钟", "计步", "工模", "老化", "开关机", "低电", "sim",
-  "短信", "消息", "协议", "上报", "下发", "小程序", "app", "ui", "lvgl", "相机",
-  "摄像头", "录音", "喇叭", "马达", "振动", "充电", "功耗", "dump", "crash",
+  "短信", "相机", "摄像头", "录音", "喇叭", "马达", "振动", "充电", "功耗", "dump", "crash",
+  "视频通话", "拨打状态", "自动挂断", "挂断", "拒接", "来电", "支付宝",
 ];
 
 const GENERIC_TERMS = new Set([
   "问题", "错误", "失败", "异常", "功能", "设备", "手表", "当前", "显示", "需要", "无法",
   "出现", "测试", "复测", "结果", "期望", "步骤", "修改", "修复", "版本", "项目", "代码",
+  "测试完成", "完成", "小程序", "程序", "app", "ui", "lvgl", "协议", "消息", "上报", "下发",
+  "lt52", "物卡", "公版", "小程序物卡公版",
 ]);
+
+const CONTEXT_ONLY_PATTERNS = [
+  /^(?:tw\d+|lt\d+|asr\d+|crane|xcx|gb|wk)$/i,
+  /^(?:tw\d+[_-])|(?:[_-](?:lt\d+|xcx|gb|wk)(?:[_-]|$))/i,
+  /^(?:小程序)?物卡公版$/,
+];
 
 function normalize(value) {
   return `${value || ""}`.toLowerCase().replace(/\\/g, "/").replace(/\s+/g, " ").trim();
@@ -33,14 +41,23 @@ function extractTerms(value) {
   const text = normalize(value);
   const latin = text.match(/[a-z_][a-z0-9_.\/-]{2,}/g) || [];
   const chineseRuns = text.match(/[\u4e00-\u9fff]{2,}/g) || [];
-  const chinese = [];
-  for (const run of chineseRuns) {
-    if (run.length <= 8) chinese.push(run);
-    for (let size = 2; size <= Math.min(4, run.length); size++) {
-      for (let i = 0; i <= run.length - size; i++) chinese.push(run.slice(i, i + size));
-    }
-  }
+  const chinese = chineseRuns.filter((run) => run.length <= 12);
   return unique([...latin, ...chinese]).filter((term) => !GENERIC_TERMS.has(term));
+}
+
+function isContextOnlyTerm(term, ctx = {}) {
+  const value = normalize(term).replace(/^`|`$/g, "");
+  if (!value || GENERIC_TERMS.has(value) || CONTEXT_ONLY_PATTERNS.some((pattern) => pattern.test(value))) return true;
+  return contextTokens(ctx).some((token) => value === token);
+}
+
+function meaningfulIssueText(bug) {
+  const title = normalize(bug.title).replace(/^(?:测试完成|验证完成|已完成|完成)$/, "");
+  const detail = normalize([
+    bug.steps, bug.actual, bug.expected,
+    bug.lastActivation?.note, bug.lastActivation?.actual, bug.lastActivation?.expected,
+  ].join("\n")).replace(/\[(?:步骤|结果|期望)\]/g, "").trim();
+  return normalize(`${title}\n${detail}`);
 }
 
 function extractExplicitKeywords(markdown) {
@@ -58,7 +75,7 @@ function detectVerification(markdown) {
     readSection(markdown, ["Verification", "验证", "验证结果"]),
     markdown.match(/(?:验证状态|验证结果|用户确认)\s*[:：].*/gi)?.join("\n") || "",
   ].join("\n"));
-  if (/未验证|待验证|待真机|待回归|未回归|失败|不通过/.test(text)) return "unverified";
+  if (/未验证|待验证|待真机|待回归|待复核|未回归|失败|不通过/.test(text)) return "unverified";
   if (/已验证|验证通过|已通过|用户确认|回归通过|真机通过|verified|passed/.test(text)) return "verified";
   return "unknown";
 }
@@ -78,7 +95,7 @@ function parseNote(filePath, root) {
     applicable: normalize(applicable),
     keywords,
     terms: unique(extractTerms(`${title}\n${keywords.join("\n")}\n${symptoms}`)),
-    codeTokens: unique((`${keyFiles}\n${markdown}`.match(/[A-Za-z_][A-Za-z0-9_]{3,}/g) || []).map(normalize)),
+    codeTokens: unique((`${keyFiles}\n${markdown}`.match(/[A-Za-z][A-Za-z0-9_]{3,}/g) || []).map(normalize)),
     searchable: normalize(`${title}\n${keywords.join("\n")}\n${applicable}\n${symptoms}\n${keyFiles}`),
   };
 }
@@ -111,18 +128,17 @@ function loadMemoryIndex(root) {
 }
 
 function buildBugFingerprint(bug) {
-  const text = normalize([
-    bug.title, bug.steps, bug.actual, bug.expected, bug.product,
-    bug.lastActivation?.note, bug.lastActivation?.actual, bug.lastActivation?.expected,
-  ].join("\n"));
-  const codeTokens = unique((text.match(/[a-z_][a-z0-9_]{3,}/g) || [])
-    .filter((term) => /_|event|msg|handler|callback|lv_|lvgl|gps|sim|nv_|task|func|camera|album/.test(term)));
-  const domainTerms = DOMAIN_TERMS.filter((term) => text.includes(term));
+  const text = meaningfulIssueText(bug);
+  const codeTokens = unique((text.match(/[a-z][a-z0-9_]{3,}/g) || [])
+    .filter((term) => /_|event|msg|handler|callback|lv_|gps|sim|nv_|task|func|camera|album/.test(term))
+    .filter((term) => !isContextOnlyTerm(term)));
+  const domainTerms = ISSUE_DOMAIN_TERMS.filter((term) => text.includes(term));
   return {
     text,
     terms: extractTerms(text),
     codeTokens,
     domainTerms,
+    hasIssueEvidence: text.length >= 4,
   };
 }
 
@@ -134,6 +150,9 @@ function contextTokens(ctx) {
 }
 
 function scoreNote(note, fingerprint, ctx) {
+  if (!fingerprint.hasIssueEvidence) {
+    return { score: 0, reasons: [], dimensions: 0, issueDimensions: 0, strongIssueEvidence: false, sameProject: false, codeHits: [] };
+  }
   let score = 0;
   const reasons = [];
   const dimensions = new Set();
@@ -145,14 +164,14 @@ function scoreNote(note, fingerprint, ctx) {
     dimensions.add("project");
   }
 
-  const keywordHits = note.keywords.filter((term) => fingerprint.text.includes(term));
+  const keywordHits = note.keywords.filter((term) => !isContextOnlyTerm(term, ctx) && fingerprint.text.includes(term));
   if (keywordHits.length) {
     score += Math.min(6, keywordHits.length * 2);
     reasons.push(`关键词：${keywordHits.slice(0, 4).join("、")}`);
     dimensions.add("keyword");
   }
 
-  const codeHits = note.codeTokens.filter((term) => fingerprint.codeTokens.includes(term));
+  const codeHits = note.codeTokens.filter((term) => !isContextOnlyTerm(term, ctx) && fingerprint.codeTokens.includes(term));
   if (codeHits.length) {
     score += Math.min(6, codeHits.length * 2);
     reasons.push(`代码标识：${codeHits.slice(0, 3).join("、")}`);
@@ -161,12 +180,12 @@ function scoreNote(note, fingerprint, ctx) {
 
   const domainHits = fingerprint.domainTerms.filter((term) => note.searchable.includes(term));
   if (domainHits.length) {
-    score += Math.min(4, domainHits.length * 2);
+    score += Math.min(6, domainHits.length * 2);
     reasons.push(`业务域：${domainHits.slice(0, 3).join("、")}`);
     dimensions.add("domain");
   }
 
-  const termHits = note.terms.filter((term) => term.length >= 3 && fingerprint.terms.includes(term));
+  const termHits = note.terms.filter((term) => term.length >= 3 && !isContextOnlyTerm(term, ctx) && fingerprint.terms.includes(term));
   if (termHits.length) {
     score += Math.min(4, termHits.length);
     reasons.push(`症状相似：${termHits.slice(0, 4).join("、")}`);
@@ -182,7 +201,7 @@ function scoreNote(note, fingerprint, ctx) {
   }
 
   const issueDimensions = Array.from(dimensions).filter((name) => name !== "project").length;
-  const strongIssueEvidence = keywordHits.length > 0 || codeHits.length > 0 || domainHits.length > 0 || termHits.length >= 2;
+  const strongIssueEvidence = keywordHits.length > 0 || codeHits.length > 0 || domainHits.length > 0 || termHits.length > 0;
   return { score: Math.max(0, score), reasons, dimensions: dimensions.size, issueDimensions, strongIssueEvidence, sameProject, codeHits };
 }
 
@@ -211,7 +230,7 @@ function matchBugToMemory(bug, notes, ctx) {
   const top = candidates[0];
   let level = "未命中";
   if (top) {
-    if (top.score >= 10 && top.verified && top.evidenceDimensions >= 2 && (top.sameProject || top.codeHits.length)) level = "高";
+    if (top.score >= 10 && top.verified && top.issueEvidenceDimensions >= 1 && (top.sameProject || top.codeHits.length)) level = "高";
     else if (top.score >= 6) level = "中";
     else level = "低";
   }

@@ -1,6 +1,6 @@
 ---
 name: asr3601-lvgl-firmware-triage
-description: Perform code-level triage, explanation, and narrow fixes for ASR3601/Crane SDK children-watch firmware issues using LVGL v7 project evidence. Use after a concrete bug report has been framed, or when the user directly asks to inspect/fix current-branch firmware behavior in D:\XM\360x_202403r1, D:\XM\crane-2024.03_r4, D:\XM\c10gongban, D:\XM\c10lezhi, ASR3601, Crane SDK, LVGL, watch/phone/sport variants, low-battery, SIM, power, location, protocol, UI, O2/subscript, resource, screenshot/log evidence, or “为什么/如何修复/先告诉我能不能做”. For raw bug intake with uncertain routing, use asr3601-bug-intake-orchestrator first. Must answer whether the issue exists before editing when asked and finish with 存在/原因/修改/影响/验证/风险.
+description: Perform code-level triage, explanation, narrow fixes, and reference-driven LVGL UI implementation planning for ASR3601/Crane SDK children-watch firmware. Use after a concrete bug is framed, or for current-branch behavior, UI screenshots/videos/effect drawings, replacing an old watch face, encoder/key interaction, scrolling text, resources, protocol, power, SIM, location, and watch/phone/sport variants. For raw uncertain intake use asr3601-bug-intake-orchestrator first. Answer existence before edits when asked and finish with 存在/原因/修改/影响/验证/风险.
 ---
 
 # ASR3601 LVGL Firmware Triage
@@ -84,6 +84,18 @@ Load `references/project-patterns.md` when the task matches calculator branch po
 - For low-battery, power-save, and SIM-removal overlap, determine state priority before editing. Verify every display path, timer, callback, and refresh path that can reopen the lower-priority popup.
 - For pixel-level UI offset fixes, locate both creation and update/refresh code. Prefer local coordinate/style changes scoped to the active page and variant; avoid broad layout refactors or language-breaking hardcoded widths.
 - For screenshot-driven triage, extract visible text, icon/resource names, page state, approximate coordinates, and trigger state from the image/video, then search those stable clues before guessing function names.
+
+## Reference UI Mode
+
+When the input is a video, effect drawing, screenshot set, or “replace the old UI” request, first produce and confirm:
+
+- page/state inventory and old-UI removal boundary;
+- encoder, key, touch, timer, and back-behavior mapping;
+- resource, font, language, and screen-resolution constraints;
+- animation, scrolling-text, focus, timeout, and persistence behavior;
+- implementation order and a page-by-page acceptance matrix.
+
+Then implement in small target-native steps. Verify page registration, resource indexes, LVGL object lifetime, long-text behavior, and excluded variants. Video appearance is behavioral evidence, not permission to guess hidden states.
 
 ## Fix Rules
 

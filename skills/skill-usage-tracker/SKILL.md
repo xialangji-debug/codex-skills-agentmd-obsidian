@@ -10,6 +10,7 @@ Use this skill to inspect or update local skill-usage telemetry. It is intention
 - Prefer official Codex OpenTelemetry when `%USERPROFILE%\.codex\skill-usage\otel\otlp.jsonl` exists.
 - Reads Codex session JSONL files under `%USERPROFILE%\.codex\sessions` and `%USERPROFILE%\.codex\archived_sessions`.
 - Writes a local SQLite database under `%USERPROFILE%\.codex\skill-usage\usage.sqlite`.
+- Stores per-file byte offsets in `session_scan_state`, so later scans read only appended JSONL bytes.
 - Does not send telemetry anywhere.
 
 ## Stable Trigger Model
@@ -45,6 +46,16 @@ python C:\Users\84365\.codex\skills\skill-usage-tracker\scripts\skill_usage_trac
 python C:\Users\84365\.codex\skills\skill-usage-tracker\scripts\skill_usage_tracker.py feedback --rating useful --note "PDF skill helped; browser was unnecessary" --best pdf --unneeded browser
 ```
 
+`report`, `trends`, `latest`, and `pending` query the database by default. Add `--scan` only when a fresh incremental import is needed:
+
+```powershell
+python C:\Users\84365\.codex\skills\skill-usage-tracker\scripts\skill_usage_tracker.py report --scan
+```
+
+Use `scan --since <ISO timestamp>` for the first cursor migration when old history is already present. The scanner ignores injected skill catalogs, AGENTS/base instructions, and tool descriptions; plugin tool usage is detected from actual tool namespaces rather than every cached plugin name.
+
+`report` and `trends` show actual skill reads/injections/tool calls by default. Add `--include-inferred` only when reviewing lower-confidence command evidence and name mentions; this keeps historical false positives from dominating normal reports.
+
 ## Registry Audit
 
 Run the deterministic registry audit before manually reorganizing skills or editing a routing index:
@@ -59,6 +70,7 @@ The command is read-only. It reports:
 - Recommended index routes that resolve, point to disabled skills, or are missing.
 - Duplicate registrations, invalid skill directories, and frontmatter problems.
 - Active skills not represented in the routing index.
+- Disabled-index records whose corresponding disabled skill folder no longer exists.
 - Reviewable patch suggestions; it never applies them automatically.
 
 Override inputs when auditing a different checkout or a captured available-skills list:

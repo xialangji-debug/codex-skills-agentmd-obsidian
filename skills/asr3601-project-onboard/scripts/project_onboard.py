@@ -248,6 +248,16 @@ def build_identity(command: str) -> tuple[str, str, str]:
     return value("CHIP_ID"), value("TARGET_OS"), value("PS_MODE")
 
 
+def memory_aliases(info: RepoInfo) -> list[str]:
+    values = [info.name, product_family(info), info.yl_device_name, info.yl_hw_ver]
+    values.extend(token for token in re.split(r"[_\-/\s]+", info.branch) if len(token) >= 3)
+    result: list[str] = []
+    for value in values:
+        if value and value != "不可用" and value not in result:
+            result.append(value)
+    return result[:16]
+
+
 def gather(repo: Path) -> RepoInfo:
     repo = repo.resolve()
     yl = read_yl(repo)
@@ -306,6 +316,8 @@ def render_files(info: RepoInfo) -> dict[str, str]:
 - [构建说明]({(info.root / '.codex-project' / 'build.md').as_posix()})
 - [协议配置]({(info.root / '.codex-project' / 'protocol.md').as_posix()})
 - [变体指纹]({(info.root / '.codex-project' / 'variant.md').as_posix()})
+- [设备目标]({(info.root / '.codex-project' / 'device.md').as_posix()})
+- [项目记忆]({(info.root / '.codex-project' / 'memory.md').as_posix()})
 """
 
     index = f"""# {info.name} Codex Project Index
@@ -328,6 +340,8 @@ def render_files(info: RepoInfo) -> dict[str, str]:
 | 收工 / 解决说明 | `asr3601-fix-closeout-reporter` |
 | 编译 / 验证 | `.codex-project/build.md` |
 | 变体确认 / 客户能力边界 | `.codex-project/variant.md` |
+| 编译/刷机目标确认 | `.codex-project/device.md` |
+| 类似问题/修复记忆 | `.codex-project/memory.md` |
 
 ## 注意
 
@@ -431,6 +445,44 @@ node \"$env:USERPROFILE\\.codex\\skills\\zentao-bug-triage\\scripts\\zentao_bug_
 - 指纹与当前仓库不一致时，先重新运行 project-onboard，不沿用旧构建或禅道映射。
 """
 
+    device_md = f"""# Device Target Context
+
+- 项目：`{info.name}`
+- 分支：`{info.branch}`
+- 预期芯片参数：`{chip_id}`
+- 构建目标：`craneg_modem_watch`
+- 预期下载设备族：`ASR Modem / ASR Serial Download / ASR DIAG`
+- 常见 USB 标识：`VID_2ECC`（只作候选，必须以实时枚举和芯片探测为准）
+- 固定 COM：`不记录`
+
+## 刷机门槛
+
+- 刷机前同时核对项目指纹、固件产物、CHIP_ID、USB VID/PID/设备名称和探测结果。
+- COM 号不是设备身份，不能因为上次使用过同一 COM 就直接刷写。
+- 检测到 ESP32、蓝牙串口、未知 USB 串口或芯片不一致时立即停止。
+- 多台嵌入式设备同时连接时，先输出候选设备表，再选择唯一匹配目标。
+"""
+
+    aliases = "\n".join(f"- `{value}`" for value in memory_aliases(info)) or "- 未确认"
+    memory_md = f"""# Project Memory Context
+
+- 记忆根目录：`{(Path.home() / 'Documents' / 'Obsidian' / 'CodexVault' / 'Codex' / 'fix-patterns')}`
+- 项目：`{info.name}`
+- 分支：`{info.branch}`
+- 产品族：`{product_family(info)}`
+- 协议：`{product}`
+
+## 搜索别名
+
+{aliases}
+
+## 使用规则
+
+- 仅在类似问题、回归、跨分支、明确日志关键词或用户要求读取记忆时搜索。
+- 默认只读最相关的 1-3 条 `fix-patterns`，不扫描整个 vault。
+- 已验证修复可提升记忆可信度；Bug 复测激活时必须把旧记忆标记为待复核。
+"""
+
     return {
         "AGENTS.md": agents,
         ".codex-project/index.md": index,
@@ -438,7 +490,48 @@ node \"$env:USERPROFILE\\.codex\\skills\\zentao-bug-triage\\scripts\\zentao_bug_
         ".codex-project/build.md": build_md,
         ".codex-project/protocol.md": protocol_md,
         ".codex-project/variant.md": variant_md,
+        ".codex-project/device.md": device_md,
+        ".codex-project/memory.md": memory_md,
     }
+
+
+def variant_fields(text: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        match = re.match(r"^-\s+([^：]+)：`([^`]*)`\s*$", line.strip())
+        if match:
+            fields[match.group(1).strip()] = match.group(2).strip()
+    return fields
+
+
+def check_context(info: RepoInfo, files: dict[str, str]) -> int:
+    missing = [rel for rel in files if not (info.root / rel).exists()]
+    live_variant = info.root / ".codex-project" / "variant.md"
+    mismatches: list[str] = []
+    if live_variant.exists():
+        current = variant_fields(live_variant.read_text(encoding="utf-8", errors="replace"))
+        expected = variant_fields(files[".codex-project/variant.md"])
+        keys = [
+            "repo", "branch", "commit", "yl_device_name", "yl_device_ver", "yl_hw_ver",
+            "CHIP_ID", "TARGET_OS", "PS_MODE", "协议", "禅道项目", "project_id", "product_id", "映射状态",
+        ]
+        for key in keys:
+            if current.get(key) != expected.get(key):
+                mismatches.append(f"{key}: recorded={current.get(key, '缺失')} live={expected.get(key, '缺失')}")
+    print(f"repo={info.root}")
+    print(f"branch={info.branch}")
+    print(f"commit={info.commit}")
+    if missing:
+        print("missing=" + ", ".join(missing))
+    if mismatches:
+        print("stale:")
+        for item in mismatches:
+            print(f"- {item}")
+    if missing or mismatches:
+        print("status=stale")
+        return 2
+    print("status=current")
+    return 0
 
 
 def write_files(info: RepoInfo, files: dict[str, str], force: bool) -> list[str]:
@@ -507,12 +600,16 @@ def main() -> int:
     parser.add_argument("--repo", default=".", help="Firmware repo path")
     parser.add_argument("--write", action="store_true", help="Write project context files")
     parser.add_argument("--dry-run", action="store_true", help="Print planned files without writing")
+    parser.add_argument("--check", action="store_true", help="Read-only check for missing or stale project context")
     parser.add_argument("--force", action="store_true", help="Overwrite existing context files")
     parser.add_argument("--no-exclude", action="store_true", help="Do not update .git/info/exclude")
     args = parser.parse_args()
 
     info = gather(Path(args.repo))
     files = render_files(info)
+
+    if args.check:
+        return check_context(info, files)
 
     print(f"repo={info.root}")
     print(f"branch={info.branch}")

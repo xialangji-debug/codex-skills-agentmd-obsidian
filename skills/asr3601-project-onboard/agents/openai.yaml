@@ -1,4 +1,4 @@
 interface:
   display_name: "360x 项目初始化"
   short_description: "生成项目上下文、构建映射与可复核的 ASR 变体指纹"
-  default_prompt: "Use $asr3601-project-onboard to generate local project context and a canonical ASR variant fingerprint for this firmware checkout."
+  default_prompt: "Use $asr3601-project-onboard to generate or check project-local ASR context, canonical variant, build/protocol/Zentao mapping, device target rules, and memory aliases."

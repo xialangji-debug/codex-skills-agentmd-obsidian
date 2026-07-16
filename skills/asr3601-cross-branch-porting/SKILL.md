@@ -1,6 +1,6 @@
 ---
 name: asr3601-cross-branch-porting
-description: Port ASR3601/Crane SDK LVGL children-watch firmware fixes across branches, versions, or sibling projects. Use when the user asks to migrate changes from another branch/version/project, mentions “移植/别的版本/当前分支/另一个工程/JC2/同类问题/回归”, needs source-target diff/merge-base checks, or needs reusable Obsidian fix-pattern guidance for ASR3601, Crane SDK, LVGL v7, watch firmware, cloud album, scheduled power, alarms, contacts, SIM, boot animation, UI resources, or protocol behavior. Must run preflight branch/short-commit/dirty-worktree checks, compare source and target, verify after the port, and write/update fix-pattern memory for reusable verified fixes.
+description: Port or integrate ASR3601/Crane SDK LVGL children-watch firmware changes across branches, versions, or sibling projects. Use for 移植, 别的版本, 当前分支, 同类问题, 回归, ordered/batch cherry-pick, 创建整合分支, 按时间顺序合入提交, or 冲突就停. Run source/target fingerprint and dirty-worktree checks, compare changes, stop safely on conflicts, verify the target, and update reusable fix-pattern memory.
 ---
 
 # ASR3601 Cross-Branch Porting
@@ -70,6 +70,26 @@ After a reusable fix, update or create one concise `fix-patterns` note unless th
    - prefer the target's documented build or simulator command
    - if full build is unavailable, run focused syntax/search checks and explain the gap
    - verify both functional behavior and excluded variants when relevant
+
+## Integration Mode
+
+Use this mode for ordered commit integration rather than source adaptation.
+
+1. Require a clean worktree, explicit start point, new branch name, and ordered commit list.
+2. Run the helper without `--apply` first. It verifies all commits and prints the exact plan without changing Git.
+3. With `--apply`, create a timestamped backup branch from the original `HEAD`, create the integration branch from the start point, then cherry-pick commits in the supplied order.
+4. Stop on the first conflict. Do not resolve, skip, abort, reorder, or continue automatically. Report completed commits, failed commit, conflicted files, and the three user choices: resolve+continue, skip, or abort.
+5. After completion, compare the integrated range and run target verification. This mode does not replace semantic adaptation when branches differ.
+
+```powershell
+python "$env:USERPROFILE\.codex\skills\asr3601-cross-branch-porting\scripts\ordered_cherry_pick.py" `
+  --repo . --start-point origin/main --new-branch codex/integrate-example `
+  --commits abc123,def456
+
+python "$env:USERPROFILE\.codex\skills\asr3601-cross-branch-porting\scripts\ordered_cherry_pick.py" `
+  --repo . --start-point origin/main --new-branch codex/integrate-example `
+  --commits abc123,def456 --apply
+```
 
 ## Diff Review Checklist
 

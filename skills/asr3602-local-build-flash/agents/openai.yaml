@@ -1,4 +1,4 @@
 interface:
   display_name: "ASR3602 Local Build Flash"
   short_description: "本地编译并刷入普通 ASR3602/360x 固件包"
-  default_prompt: "Use $asr3602-local-build-flash to compile the current ASR3602 firmware package and flash it to the connected device."
+  default_prompt: "Use $asr3602-local-build-flash to compile the current ASR3602 package, verify project/artifact/chip/USB target identity, and flash only the matched ASR device."

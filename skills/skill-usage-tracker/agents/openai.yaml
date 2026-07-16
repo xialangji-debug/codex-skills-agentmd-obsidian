@@ -1,4 +1,4 @@
 interface:
   display_name: "Skill Usage & Registry Auditor"
-  short_description: "Track usage and audit local skill routes"
-  default_prompt: "Use $skill-usage-tracker to audit my local skill registry and routing index."
+  short_description: "增量统计真实Skill使用并审计路由和失效索引"
+  default_prompt: "Use $skill-usage-tracker to incrementally scan actual skill use, report without rescanning by default, and audit active, plugin, route, and stale-disabled consistency."

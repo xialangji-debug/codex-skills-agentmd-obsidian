@@ -13,6 +13,11 @@ if [ "$INSTALL_SKILLS" = "1" ]; then
   mkdir -p "$CODEX_HOME/skills"
   cp -R "$REPO_ROOT/skills/." "$CODEX_HOME/skills/"
   echo "已安装 skills 到 $CODEX_HOME/skills"
+  if [ -d "$REPO_ROOT/skills-index" ]; then
+    mkdir -p "$CODEX_HOME/skills-index"
+    cp -R "$REPO_ROOT/skills-index/." "$CODEX_HOME/skills-index/"
+    echo "已安装一行式/领域 skill 索引到 $CODEX_HOME/skills-index"
+  fi
 fi
 
 if [ "$INSTALL_MCP" = "1" ]; then

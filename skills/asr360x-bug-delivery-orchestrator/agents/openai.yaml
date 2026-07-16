@@ -1,0 +1,4 @@
+interface:
+  display_name: "360x Bug连续交付"
+  short_description: "编排360x Bug修复验证提交禅道解决和固件发布"
+  default_prompt: "Use $asr360x-bug-delivery-orchestrator to coordinate selected ASR360x bugs from deep fetch through fix, verification, one Chinese commit per bug, memory decision, Zentao resolution, and an explicitly requested release with resumable local state."

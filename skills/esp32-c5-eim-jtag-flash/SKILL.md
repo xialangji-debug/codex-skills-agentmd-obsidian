@@ -16,6 +16,7 @@ Use this skill when the user wants to compile, flash, or recover an ESP32-C5 pro
    - Prefer devices with `VID_303A&PID_1001`.
    - Expected serial label can be `USB Serial Device (COMxx)` or localized equivalent.
    - The matching USB JTAG interface can appear as `USB JTAG/serial debug unit`.
+   - Run the shared `aa-skill-router/scripts/embedded_target_preflight.ps1` before UART or JTAG flashing. It must identify ESP32-C5 rather than an attached ASR target.
 3. For the known `C:\Users\84365\Desktop\esp32_c5` board, prefer direct JTAG (`-ForceJtag`) because UART download mode has repeatedly failed with `No serial data received`.
 4. Try UART flashing only if the user specifically wants to test normal serial flashing:
    - `idf.py -p COMxx -b 115200 flash`

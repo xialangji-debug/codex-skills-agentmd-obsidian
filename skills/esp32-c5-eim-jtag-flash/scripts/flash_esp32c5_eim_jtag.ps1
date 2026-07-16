@@ -134,6 +134,13 @@ try {
         Write-Host "Selected serial port: $Port"
     }
 
+    $preflight = Join-Path $env:USERPROFILE ".codex\skills\aa-skill-router\scripts\embedded_target_preflight.ps1"
+    if (-not (Test-Path -LiteralPath $preflight)) { throw "Embedded target preflight not found: $preflight" }
+    $preflightArgs = @("-ExpectedFamily", "ESP32-C5", "-ExpectedChip", "ESP32-C5", "-ProjectDir", $ProjectDir)
+    if (-not [string]::IsNullOrWhiteSpace($Port)) { $preflightArgs += @("-Port", $Port) }
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $preflight @preflightArgs
+    if ($LASTEXITCODE -ne 0) { throw "Embedded target preflight blocked flashing" }
+
     if ($ForceJtag -and -not $SkipBuild) {
         Invoke-Step "Build project" { & "idf.py" "build" } "idf.py build" | Out-Null
     }

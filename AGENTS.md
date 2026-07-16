@@ -26,34 +26,21 @@ Use broader memory when the user says "读取记忆库", "继续上次", "记一
 
 ## Skill And Project Routing
 
-Use `aa-skill-router` first for short workflow requests such as "抓 bug", "当前 bug", "禅道", "修 bug", "协议", "日志", "收工更新", "出版本", "初始化当前 360x 项目上下文", or "skill 整理".
+Choose skills from the current task and available-skill descriptions. Keep detailed procedures inside the owning skill instead of duplicating them in this global file.
 
 If a required skill is not exposed but exists locally, read:
 
 `<CODEX_HOME>\skills\<skill-name>\SKILL.md`
 
-Use `<CODEX_HOME>\skills-index\index.md` only when routing is unclear or the user asks to organize skills.
+Use `<CODEX_HOME>\skills-index\index.md` only when routing is unclear or the user asks to organize skills. The main index is a one-line catalog; read a domain index only when needed.
 
 Prefer project-local context when present:
 
 - `AGENTS.md`
 - `.codex-project\index.md`
-- `.codex-project\zentao.md`
-- `.codex-project\build.md`
-- `.codex-project\protocol.md`
+- Other files linked by the project index
 
 Keep active skills flat under `<CODEX_HOME>\skills`; archive inactive skills under `<CODEX_HOME>\skills.disabled`.
-
-## Zentao Bug Intake
-
-In ASR3601/ASR3602/360x/Crane/LVGL firmware workspaces, treat "抓 bug", "当前 bug", "当前分支 bug", "这个分支有哪些 bug", and "看禅道 bug" as Zentao fetch-and-triage requests.
-
-Workflow:
-
-1. Use `zentao-bug-triage`; if unavailable, read its local `SKILL.md` directly.
-2. Identify the current repo, branch, short commit, product/version mapping, then run the snapshot workflow. Do not ask for reproduction steps first.
-3. Return the compact table: `ID | 标题 | 类型 | 处理建议 | 附件 | 我能否先修`.
-4. Use `asr3601-bug-intake-orchestrator` only after a concrete bug ID, detail, screenshot, log, or attachment needs code-level judgment or fixing.
 
 ## Writing Memory
 

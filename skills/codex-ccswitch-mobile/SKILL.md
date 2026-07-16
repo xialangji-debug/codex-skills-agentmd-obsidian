@@ -1,6 +1,6 @@
 ---
 name: codex-ccswitch-mobile
-description: Use when configuring or troubleshooting Codex mobile remote control with desktop Codex requests routed through CC Switch sites such as icodeeasy, local OpenAI-compatible proxies, or third-party Responses API relays, especially when checking same-account login and localhost proxy ports.
+description: Configure or troubleshoot Codex mobile remote control and desktop CC Switch routing, including same-account login, local OpenAI-compatible Responses relays, HTTP/SOCKS proxy reachability, WebSocket disconnects, OAuth device-code 403 or unsupported-country errors, and proxy exit-region checks. Use for CC Switch, icodeeasy, mobile remote, ws/wss connection, websocket closed before completion, or OAuth region failures.
 ---
 
 # Codex CC Switch Mobile
@@ -90,6 +90,18 @@ For CC Switch, `<proxy-port>` is often `15721`, but always verify the actual lis
    - Primary success signal: mobile can control desktop Codex.
    - Routing success signal: CC Switch logs show a new Codex request.
 
+5. For network errors, run the bundled layered diagnostic before changing auth/config:
+
+```powershell
+python "$env:USERPROFILE\.codex\skills\codex-ccswitch-mobile\scripts\network_diagnostics.py" `
+  --http-proxy http://127.0.0.1:7897 `
+  --socks-proxy socks5://127.0.0.1:1080 `
+  --api-base http://127.0.0.1:15721/v1 `
+  --ws-url ws://127.0.0.1:15721/ws
+```
+
+Pass an observed OAuth error with `--error-text` to classify it without replaying authentication. Use `--region-url` only when the user wants to query a chosen IP/region service.
+
 ## Verification Commands
 
 Use these commands, redacting secrets in any user-facing output:
@@ -122,6 +134,9 @@ If mobile sends a message and no new CC Switch log appears, the active desktop p
 - CC Switch gets 404/405: upstream relay likely does not support `/v1/responses`.
 - Upgrade prompt appears in mobile: this is usually account/Auth quota, not proof that model calls bypass CC Switch. Check CC Switch logs before changing anything.
 - Old sessions disappear after provider changes: this can happen because Codex session visibility is provider/account scoped.
+- `websocket closed by server before response.completed`: HTTP reachability alone is insufficient; test the exact `ws://` or `wss://` endpoint and whether the selected proxy supports upgrade/tunnel traffic.
+- `unsupported_country_region_territory`: the OAuth request reached the service but the observed exit region is not accepted. Check whether only the app, only the child process, or the whole system is using the intended proxy before retrying.
+- SOCKS TCP succeeds but requests still fail: a listening port proves only local reachability. Confirm the calling application actually supports SOCKS5 and DNS-through-proxy behavior.
 
 ## Safety
 
@@ -129,3 +144,4 @@ If mobile sends a message and no new CC Switch log appears, the active desktop p
 - Back up `~/.codex/auth.json` and `~/.codex/config.toml` before edits.
 - Do not expose the local proxy port to the LAN or internet for mobile access.
 - Prefer changing Auth layer only when model routing is already correct.
+- Do not replay OAuth device-code requests automatically. Classify captured errors first and only probe an endpoint when the user explicitly requests it.

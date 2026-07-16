@@ -69,7 +69,7 @@ function parseArgs(argv) {
     projectKey: "",
     projectId: "",
     productId: "",
-    bugStatus: "all",
+    bugStatus: "active",
     ids: [],
     output: "",
     expectRepoName: "",
@@ -124,7 +124,7 @@ function parseArgs(argv) {
     else if (a === "--cleanup") args.cleanup = next();
     else if (a === "--help" || a === "-h") {
       console.log(`Usage:
-  node zentao_bug_snapshot.js --repo . --limit 80
+  node zentao_bug_snapshot.js --repo . --bug-status active --limit 80
   node zentao_bug_snapshot.js --repo . --limit 80 --detail-concurrency 4
   node zentao_bug_snapshot.js --repo . --limit 80 --detail-limit 20 --detail-concurrency 4
   node zentao_bug_snapshot.js --repo . --limit 80 --detail-retries 2 --detail-timeout-ms 60000
@@ -134,15 +134,17 @@ function parseArgs(argv) {
   node zentao_bug_snapshot.js --repo . --project-name "TW18_阿科奇_LT52_乐智" --limit 80
   node zentao_bug_snapshot.js --repo . --project-id 134 --limit 80
   node zentao_bug_snapshot.js --repo . --product-id 42 --project-name "TW18_阿科奇_LT52_APP" --limit 80
-  node zentao_bug_snapshot.js --repo . --bug-status unresolved --detail-limit 0
+  node zentao_bug_snapshot.js --repo . --bug-status active --detail-limit 0
+  node zentao_bug_snapshot.js --repo . --bug-status all --limit 80
   node zentao_bug_snapshot.js --repo . --ids 2947,2906,2894 --download-attachments
   node zentao_bug_snapshot.js --repo . --expect-repo-name lt52_XCX_GB --expect-branch TW18_LT52_3602_小程序协议腕表20251218 --current-mine-active
   node zentao_bug_snapshot.js --cleanup "C:\\Users\\...\\.codex\\zentao-bug-triage\\snapshots\\<snapshot>"
 
 Defaults:
   With only --repo, the script reads references/project-map.md, resolves the current
-  branch/yl_device_ver to a Zentao project, and fetches that project. If no exact
-  project mapping is found it falls back to --assigned.
+  branch/yl_device_ver to a Zentao project, and fetches only active bugs. If no
+  exact project mapping is found it falls back to --assigned. Use --bug-status all,
+  resolved, or closed only when the user explicitly requests those statuses.
   --expect-repo-name and --expect-branch are preflight guards. When provided, any
   mismatch aborts before opening Zentao, which prevents fetching bugs from the
   wrong worktree or branch.
