@@ -9,6 +9,8 @@ Use this skill to prepare an Akq domestic firmware release end to end: update th
 
 ## Safety Rules
 
+- Before every release, run `git status --short` before changing `yl.h`, generating release notes, cleaning, building, packaging, or uploading. If there are staged, unstaged, or untracked files, stop and ask the user how to handle them. Do not automatically commit, stage, stash, discard, clean, or bypass them.
+- After the user-approved working-tree handling leaves a clean tree, synchronize the current branch with its configured upstream before release work. Run `git fetch`, compare upstream and `HEAD`, push when only the local branch is ahead, and use `git pull --ff-only` when only the local branch is behind. If the branch has no upstream or has diverged, stop and ask the user; never force-push, rebase, merge, or reset automatically. Continue only after both ahead and behind counts are zero.
 - Do not guess the build configuration. Derive it from the current repo, previous successful terminal output, build scripts, project notes, or ask the user.
 - Treat a user request to "出版本" as permission to upload to the confirmed product folder and to create only the final timestamp release folder named `YYYYMMDD_HHMM` when it is missing.
 - If the remote team, domestic, or product folder does not exist, stop and ask the user to confirm the mapping. Do not create those larger folders automatically.
@@ -42,7 +44,14 @@ Use the username/password to fill the login form, but never echo `$password`. If
 
 Preferred fast path: use `scripts/akq_release.ps1` for normal releases. It performs remote preflight first, updates `yl.h`, protects against untracked source before clean builds, runs clean/build only when the current release state has not already completed those steps, prepares renamed upload files, generates or copies release `readme.txt`, uploads, and writes a local `.akq_release_state.json` checkpoint under the release upload directory for safe resume.
 
-1. Identify the release context:
+1. Check local changes and synchronize Git before invoking the release controller:
+   - Run `git status --short`, `git branch --show-current`, and `git rev-parse --short HEAD`.
+   - If `git status --short` has any output, show the file list to the user and ask whether to commit, keep for a nonstandard release, stash, discard, or cancel. Perform none of those choices without the user's explicit answer.
+   - Once clean, require a configured upstream and run `git fetch` followed by `git rev-list --left-right --count "@{upstream}...HEAD"`.
+   - Interpret the result as `<behind> <ahead>`: push normally if only ahead; run `git pull --ff-only` if only behind; stop for user direction if both are nonzero. Recheck until the result is `0 0`.
+   - Only after the clean-tree and `0 0` checks pass may `akq_release.ps1` update `yl.h` or perform any release step.
+
+2. Identify the release context:
    - Run `git status --short`, `git branch --show-current`, and `git rev-parse --short HEAD`.
    - Read `.codex-project\variant.md` when present and confirm repo, branch, commit, dirty state, `yl_device_ver`, chip, OS, protocol, customer/product variant, build parameters, and Zentao mapping. Refresh it with `asr3601-project-onboard` if missing or stale; never reuse another customer's release fingerprint.
    - Treat `??` files under source/config paths as a release blocker before clean builds. Commit them when the user requested commits; otherwise confirm before bypassing with `-AllowUntrackedSource`.
@@ -50,19 +59,19 @@ Preferred fast path: use `scripts/akq_release.ps1` for normal releases. It perfo
    - Extract `yl_device_ver`, `yl_device_name`, `yl_hw_ver`, and `yl_soft_ver`.
    - Determine the release time in `YYYYMMDD_HHMM` format. If the user did not provide it, ask or use the intended build time only after confirmation.
 
-2. Update `yl.h` conservatively:
+3. Update `yl.h` conservatively:
    - Default behavior: replace only the `YYYYMMDD_HHMM` segment inside `yl_device_ver`.
    - Do not change `V1.0.x`, model prefix, `TW10/TW18`, `CN`, `Release_WX`, `yl_hw_ver`, or `yl_soft_ver` unless the user explicitly requests it.
    - Leave this timestamp change as a working-tree change for a normal release; do not commit it unless the user explicitly requests a commit.
    - If the user requested commits, commit code fixes first, then commit the `yl.h` timestamp update, then build/upload. Do not build/upload first and commit the version later.
 
-3. Clean rebuild:
+4. Clean rebuild:
    - Confirm the correct build command/configuration for this repo and branch before compiling.
    - Run the clean command for the same build configuration before building. For make-based ASR3602 watch projects, this is normally `make clean` followed by the target build using the same `PS_MODE`, `TARGET_OS`, and `CHIP_ID`.
    - For ASR3602 watch projects, the common output target is usually under `out/product/craneg_modem_watch`, but do not assume that if the repo differs.
    - After build, inspect artifact timestamps and sizes. Use only artifacts generated by the clean rebuild, not older manual zip files left in the output directory.
 
-4. Prepare upload artifacts:
+5. Prepare upload artifacts:
    - Use `scripts/prepare_release_package.py` with `--dry-run` first.
    - Main upload files are normally:
      - firmware zip, renamed to `<yl_device_ver>.zip`
@@ -71,13 +80,13 @@ Preferred fast path: use `scripts/akq_release.ps1` for normal releases. It perfo
    - Do not upload source packages such as `*_source.zip` unless the user explicitly asks.
    - Prefer copying renamed files into `out/product/<target>/release_upload/<YYYYMMDD_HHMM>/` instead of renaming build outputs in place.
 
-5. Handle `readme.txt`:
+6. Handle `readme.txt`:
    - Default release behavior for this user: keep repo `README.md` updated as a local changelog when useful, generate/copy `release_upload/<YYYYMMDD_HHMM>/readme.txt`, and upload it with the release.
    - Do not commit repo `README.md` unless the user explicitly asks to submit/readme/commit it.
    - If the user provides a specific readme path, pass it with `-Readme`; otherwise let `akq_release.ps1` generate `readme.txt`.
    - For readme-only补传 after zip/mdb already exist remotely, use `fnos_upload_release.js --include-readme --allow-existing-identical`; it skips identical zip/mdb and uploads only missing/different `readme.txt`.
 
-6. Upload to fnOS:
+7. Upload to fnOS:
    - Open `https://fnos.yuelaniot.com:5667`.
    - Navigate through 文件管理 to `团队文件 > 阿科奇 > 阿科奇-国内`.
    - Choose the correct product folder using `references/project-folder-map.md`: explicit CLI folder first, exact/current branch mapping second, `yl_device_ver` as confirmation, and local path only as a weak hint. Do not let a different local checkout path block a branch/version-confirmed mapping.
@@ -86,7 +95,7 @@ Preferred fast path: use `scripts/akq_release.ps1` for normal releases. It perfo
    - Upload the renamed zip, renamed `.mdb.txt`, and release `readme.txt` automatically unless `-NoReadme` was used.
    - Verify the remote folder contains exactly the intended release files. If any same-name remote file exists, stop and ask before overwriting.
 
-7. Resume behavior:
+8. Resume behavior:
    - If a previous `akq_release.ps1` run wrote a matching checkpoint for the same repo, branch, commit, source diff hash, release time, device version, target, and build environment, skip completed build/package steps.
    - If upload was interrupted after files reached fnOS, rerun the same command; upload uses `--allow-existing-identical` so same-name same-size files are treated as already complete.
    - If a local package/checkpoint uses the same release time but a different source diff hash, stop by default. Use a new release time for a new build, `-TrustExistingPackage` to verify/upload the existing package, or `-ForceCleanBuild` only when rebuilding the same timestamp is intentional.

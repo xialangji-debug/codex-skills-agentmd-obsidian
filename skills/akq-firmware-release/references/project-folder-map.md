@@ -127,6 +127,15 @@ verified: 2026-07-08
 note: User-confirmed APP protocol branch and release folder for LT52 APP public firmware.
 ```
 
+```text
+local_path: C:\Users\84365\Desktop\inside\lt52_XCX_GB
+branch_contains: TW18_LT52_3602_小程序协议腕表20251218
+yl_device_ver_contains: LT52_ZX_ASR3602_TW18
+fnos_folder: TW18_阿科奇_LT52_小程序公版
+verified: 2026-07-16
+note: User explicitly requested creating this fnOS product folder for the LT52 mini-program public branch.
+```
+
 Add confirmed mappings in this format:
 
 ```text

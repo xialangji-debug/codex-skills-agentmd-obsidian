@@ -6,10 +6,10 @@
 
 - 一组可直接安装到 Codex 的 `skills/`，当前同步 22 个本机自定义 skill
 - 一行式主目录与按需领域目录 `skills-index/`
-- 可选 MCP 工具：CATStudio 在线日志准备、AbootDownload 安全烧录辅助、Everything 文件搜索、WeFlow 聊天导出辅助
+- 可选 MCP 元数据：Everything 文件搜索
 - 通用版 `AGENTS.md`，用于约束 Codex 如何按需使用 Obsidian Markdown 记忆库
 - 一个空的 Obsidian 记忆库模板，适合别人从零开始建立项目记忆
-- Windows 一键安装脚本 `scripts/install.ps1`，会在未检测到 Obsidian 时先尝试安装 Obsidian，并把 MCP 配置追加到 Codex `config.toml`
+- Windows 一键安装脚本 `scripts/install.ps1`，会在未检测到 Obsidian 时先尝试安装 Obsidian，并复制仓库内公开 MCP 元数据
 
 本仓库不包含私人 Obsidian 笔记、聊天记录、账号令牌、密钥或 MCP 本机私有配置。少量 skill 示例会保留可替换的本机路径写法，真正的密码、token 和私有配置不要提交。
 
@@ -42,19 +42,22 @@
 │   ├── release/
 │   └── memory/
 ├── mcp/
-│   ├── aboot-download/
-│   ├── catstudio-online-log/
-│   ├── everything-search/
-│   └── weflow-export/
+│   └── everything-search/
 └── skills/
 ```
 
 ## 当前同步快照
 
-- 更新时间：2026-07-16
+- 更新时间：2026-07-17
 - Skills：22 个本机自定义 skill，未包含 Codex 内置 `.system` skill
-- MCP：`aboot-download`、`catstudio-online-log`、`everything-search`、`weflow-export`
+- MCP：`everything-search`（仅同步公开说明、许可证、`pyproject.toml` 和示例配置）
 - 未发布的本机 MCP：`node_repl` 属于 Codex App 内置运行时，不作为仓库 MCP 分发
+
+### 2026-07-17 更新
+
+- 按当前本机状态收敛仓库 MCP，同步为仅保留 `everything-search` 的公开元数据；移除已不在这台机器上启用的 `aboot-download`、`catstudio-online-log`、`weflow-export`。
+- Windows / macOS / Linux 安装说明同步更新：仓库不再自动向 Codex `config.toml` 追加这些旧 MCP 配置。
+- 同步本机 `akq-firmware-release` 等 skill 的最新公开内容，并清理仓库里误带入的 Python `__pycache__` 缓存产物。
 
 ### 2026-07-14 更新
 
@@ -102,13 +105,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 
 脚本会先检测本机是否安装 Obsidian；如果没有，会尝试通过 `winget install Obsidian.Obsidian` 安装。没有 `winget` 时，脚本会提示手动安装地址。
 
-Windows 脚本默认还会复制 `mcp/` 到 `%USERPROFILE%\.codex\mcp`，并在 `%USERPROFILE%\.codex\config.toml` 里追加当前仓库内置的 MCP：
+Windows 脚本在未指定 `-SkipMcp` 时会把 `mcp/` 复制到 `%USERPROFILE%\.codex\mcp`。当前仓库只保留 `everything-search` 的公开元数据，不会自动向 Codex `config.toml` 追加 MCP server 配置。
 
-- `catstudio-online-log`：刷机后准备 CATStudio 在线 LogViewer、选中当前 `.mdb.txt` 数据库并应用右侧日志筛选
-- `aboot-download`：查找 release 包、检查 AbootDownload/adownload、生成烧录命令，只有显式确认才会执行烧录
-- `weflow-export`：诊断 WeFlow 本机 HTTP API，并导出微信聊天为 JSONL、Markdown 或 CSV
-
-`everything-search` 当前仅同步公开说明、许可证和示例配置，不由安装脚本自动启用；需要时请按 `mcp/everything-search/everything_search_config.example.json` 手动配置。
+需要时请按 `mcp/everything-search/everything_search_config.example.json` 手动配置 `everything-search`。
 
 如不需要 MCP：
 
@@ -155,7 +154,7 @@ bash scripts/install.sh
 
 macOS / Linux 脚本不会自动安装 Obsidian。需要 Obsidian 的话，请先从官网安装：<https://obsidian.md/download>。
 
-macOS / Linux 脚本默认不安装 MCP，因为当前 MCP 主要服务 Windows 上的 CATStudio、AbootDownload 和 WeFlow。如果只想复制 MCP 文件，可设置 `INSTALL_MCP=1` 后手动配置 Codex。
+macOS / Linux 脚本默认不安装 MCP。如果只想复制 `everything-search` 的公开元数据，可设置 `INSTALL_MCP=1` 后再按示例手动配置 Codex。
 
 也可以指定路径：
 

@@ -24,7 +24,7 @@ if [ "$INSTALL_MCP" = "1" ]; then
   mkdir -p "$CODEX_HOME/mcp"
   cp -R "$REPO_ROOT/mcp/." "$CODEX_HOME/mcp/"
   echo "已复制 MCP 到 $CODEX_HOME/mcp"
-  echo "这些 MCP 主要面向 Windows CATStudio/AbootDownload/WeFlow；请按需手动配置 Codex config.toml。"
+  echo "当前仓库只包含 everything-search 的公开元数据；请按示例手动配置 Codex。"
 fi
 
 if [ "$INSTALL_AGENTS" = "1" ]; then

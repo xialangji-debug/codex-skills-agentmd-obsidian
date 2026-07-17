@@ -86,68 +86,6 @@ function Copy-DirectoryContents {
   }
 }
 
-function Get-PythonCommand {
-  $runtimePython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
-  if (Test-Path -LiteralPath $runtimePython) {
-    return $runtimePython
-  }
-
-  $python = Get-Command "python" -ErrorAction SilentlyContinue
-  if ($python) {
-    return $python.Source
-  }
-
-  return "python"
-}
-
-function Get-NodeCommand {
-  $runtimeNode = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
-  if (Test-Path -LiteralPath $runtimeNode) {
-    return $runtimeNode
-  }
-
-  $node = Get-Command "node" -ErrorAction SilentlyContinue
-  if ($node) {
-    return $node.Source
-  }
-
-  return "node"
-}
-
-function Add-McpServerConfig {
-  param(
-    [Parameter(Mandatory=$true)][string]$ConfigPath,
-    [Parameter(Mandatory=$true)][string]$ServerName,
-    [Parameter(Mandatory=$true)][string]$Command,
-    [Parameter(Mandatory=$true)][string[]]$Args
-  )
-
-  New-Item -ItemType Directory -Path (Split-Path -Parent $ConfigPath) -Force | Out-Null
-  if (-not (Test-Path -LiteralPath $ConfigPath)) {
-    New-Item -ItemType File -Path $ConfigPath -Force | Out-Null
-  }
-
-  $content = Get-Content -LiteralPath $ConfigPath -Raw
-  $sectionPattern = "(?m)^\[mcp_servers\.$([regex]::Escape($ServerName))\]"
-  if ($content -match $sectionPattern) {
-    Write-Host "MCP config already exists: $ServerName"
-    return
-  }
-
-  $argsText = ($Args | ForEach-Object { "'$_'" }) -join ", "
-
-  $block = @"
-
-[mcp_servers.$ServerName]
-command = '$Command'
-args = [$argsText]
-startup_timeout_sec = 30
-"@
-
-  Add-Content -LiteralPath $ConfigPath -Value $block -Encoding UTF8
-  Write-Host "Added MCP config: $ServerName"
-}
-
 function Install-McpTools {
   if ($SkipMcp -or -not (Test-Path -LiteralPath $McpSource)) {
     return
@@ -164,16 +102,9 @@ function Install-McpTools {
     }
   }
 
-  $pythonCommand = Get-PythonCommand
-  $nodeCommand = Get-NodeCommand
-  $configToml = Join-Path $CodexHome "config.toml"
-  Add-McpServerConfig -ConfigPath $configToml -ServerName "catstudio-online-log" -Command $pythonCommand -Args @((Join-Path $mcpDest "catstudio-online-log\catstudio_online_log_mcp.py"))
-  Add-McpServerConfig -ConfigPath $configToml -ServerName "aboot-download" -Command $pythonCommand -Args @((Join-Path $mcpDest "aboot-download\aboot_download_mcp.py"))
-  Add-McpServerConfig -ConfigPath $configToml -ServerName "weflow-export" -Command $nodeCommand -Args @((Join-Path $mcpDest "weflow-export\weflow_export_mcp_server.js"))
-
   Write-Host "Installed MCP tools to $mcpDest"
-  Write-Host "If needed, copy each *.example.json to *_config.json and edit local tool paths."
-  Write-Host "everything-search is metadata-only in this repo; configure it manually from the example file when needed."
+  Write-Host "This repo only ships metadata/example files for everything-search."
+  Write-Host "Configure the MCP server manually from everything_search_config.example.json when needed."
 }
 
 Ensure-ObsidianInstalled
