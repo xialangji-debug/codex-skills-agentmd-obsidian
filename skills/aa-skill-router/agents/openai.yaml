@@ -1,0 +1,4 @@
+interface:
+  display_name: "本地工程 Skill 路由"
+  short_description: "根据当前项目、用户意图和风险边界选择唯一的本地工程工作流入口"
+  default_prompt: "使用 $aa-skill-router 识别当前项目，并把短请求路由到正确的固件、禅道、记忆或交付 Skill。"

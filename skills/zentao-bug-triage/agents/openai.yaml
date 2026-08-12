@@ -1,0 +1,4 @@
+interface:
+  display_name: "禅道 Bug 抓取与对账"
+  short_description: "抓取禅道详情、历史和全部附件，并对比精确目标的历史状态变化与复发结果"
+  default_prompt: "使用 $zentao-bug-triage 抓取当前目标的禅道 Bug、附件和历史，并与上次本地基线对账。"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "禅道 Bug 解决"
+  short_description: "安全预览并提交开发侧解决状态，同时同步本地精确目标的记忆证据状态"
+  default_prompt: "使用 $zentao-bug-resolver 先预览再提交选定 Bug 的开发侧解决操作，并同步精确目标记忆。"

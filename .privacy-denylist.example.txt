@@ -1,0 +1,5 @@
+# label<TAB>literal value
+customer-example	Example Customer Confidential
+project-example	example-private-branch-20260101
+service-example	private-service.example.invalid
+device-example	EXAMPLE_PRIVATE_DEVICE_V1

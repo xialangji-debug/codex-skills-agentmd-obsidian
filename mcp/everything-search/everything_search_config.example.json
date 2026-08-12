@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "everything-search": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-everything-search"
+      ],
+      "env": {
+        "EVERYTHING_SDK_PATH": "C:\\path\\to\\Everything-SDK\\dll\\Everything64.dll"
+      }
+    }
+  }
+}

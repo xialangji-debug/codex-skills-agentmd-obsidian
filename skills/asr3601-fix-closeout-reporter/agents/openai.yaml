@@ -1,0 +1,4 @@
+interface:
+  display_name: "ASR360x Fix Verification and Closeout"
+  short_description: "Run explicit firmware closeout and validation-debt checks"
+  default_prompt: "Use $asr3601-fix-closeout-reporter for an explicit closeout, multi-step delivery review, release readiness, or validation-debt report; do not add it to a direct Fast Fix."

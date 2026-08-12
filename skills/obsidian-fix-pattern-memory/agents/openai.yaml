@@ -1,0 +1,4 @@
+interface:
+  display_name: "Obsidian 修复记忆"
+  short_description: "自动维护根因笔记、精确目标矩阵、验证证据和复发状态"
+  default_prompt: "使用 $obsidian-fix-pattern-memory 查询或更新一条规范的修复记忆，并准确记录当前目标的证据状态。"

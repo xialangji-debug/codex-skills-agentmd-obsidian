@@ -1,0 +1,4 @@
+interface:
+  display_name: "ASR360x Bug 连续交付"
+  short_description: "按断点编排修复、中文提交、规范记忆、禅道解决和用户明确要求的发布流程"
+  default_prompt: "使用 $asr360x-bug-delivery-orchestrator 按证据推进选定 Bug 的可恢复连续交付流程。"

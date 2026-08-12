@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex CC Switch Mobile"
+  short_description: "诊断CC Switch手机远程、代理、WS和OAuth地区错误"
+  default_prompt: "Use $codex-ccswitch-mobile to configure or diagnose mobile auth, local Responses routing, HTTP/SOCKS reachability, WebSocket upgrades, and OAuth region errors without exposing secrets."
