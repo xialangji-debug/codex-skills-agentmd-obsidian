@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 PYTHON_TESTS = [
     "scripts/test_privacy_scan.py",
+    "scripts/test_sync_public_snapshot.py",
     "skills/asr3601-cross-branch-porting/scripts/test_ordered_cherry_pick.py",
     "skills/asr3601-fix-closeout-reporter/scripts/test_closeout_verification.py",
     "skills/asr3601-fix-closeout-reporter/scripts/test_validation_debt_report.py",
