@@ -34,6 +34,8 @@ git commit -m "type(scope): outcome"
 
 多主题脏工作区不要使用 `git add .`。先明确每个提交的文件集合，再逐组暂存和验证。
 
+公开 Skills/MCP 的同步必须通过 `public-sync-manifest.json` 和 `scripts/sync_public_snapshot.py`，不得临时遍历整个 `%USERPROFILE%\.codex` 后直接复制。完整流程见 [公开快照同步](docs/public-sync.md)。自动化只能创建独立分支和 PR，不能直接更新或自动合并 `main`。
+
 ## 隐私与样例
 
 - 只使用 `example.invalid`、`zentao.example`、`SAMPLE_*`、`DEMO-*` 等明显的合成标识。

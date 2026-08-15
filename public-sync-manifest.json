@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "repository": "https://github.com/xialangji-debug/codex-skills-agentmd-obsidian.git",
+  "global_files": [
+    {
+      "source": "AGENTS.md",
+      "destination": "AGENTS.md"
+    }
+  ],
+  "skills": [
+    "aa-skill-router",
+    "asr3601-cross-branch-porting",
+    "asr3601-fix-closeout-reporter",
+    "asr3601-lvgl-firmware-triage",
+    "asr3601-project-onboard",
+    "asr3601-protocol-branch-matrix",
+    "asr3602-local-build-flash",
+    "asr360x-bug-delivery-orchestrator",
+    "catstudio-log-extractor",
+    "codex-ccswitch-mobile",
+    "codex-clash-proxy",
+    "obsidian-fix-pattern-memory",
+    "skill-usage-tracker",
+    "zentao-bug-resolver",
+    "zentao-bug-triage"
+  ],
+  "mcp_packages": [
+    {
+      "name": "everything-search",
+      "source": "mcp/mcp-everything-search",
+      "destination": "mcp/everything-search",
+      "files": [
+        "LICENSE",
+        "pyproject.toml",
+        "README.md",
+        "SEARCH_SYNTAX.md"
+      ]
+    }
+  ],
+  "exclude_globs": [
+    ".git/**",
+    ".venv/**",
+    ".pytest_cache/**",
+    "__pycache__/**",
+    "node_modules/**",
+    "*.pyc",
+    "*.pyo",
+    "*.log",
+    "*.tmp",
+    "*.db",
+    "*.sqlite",
+    "*.zip",
+    "*.7z",
+    "*.bin",
+    "*.hex",
+    "*.mdb",
+    "*.icl",
+    "*.ild",
+    "*.mp4",
+    "*.png",
+    "*.jpg",
+    "*.jpeg",
+    ".env",
+    ".env.*",
+    "*.private.local.*"
+  ]
+}

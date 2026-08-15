@@ -114,18 +114,33 @@ Codex 原生扩展点：
 |-- obsidian/Codex/                   # 空的工作记忆模板
 |-- mcp/everything-search/            # 公开元数据与配置示例
 |-- docs/                             # 工作流与脱敏案例
+|-- public-sync-manifest.json         # 自动同步的显式公开白名单
 |-- scripts/install.ps1               # Windows 安装入口
 |-- scripts/install.sh                # macOS/Linux 安装入口
 |-- scripts/privacy_scan.py           # 当前树、暂存区和历史隐私检查
+|-- scripts/sync_public_snapshot.py   # 候选树构建与确定性同步
 `-- scripts/run_public_checks.py      # 离线测试与安装烟测
 ```
 
 <details>
 <summary>当前公开 Skills</summary>
 
+<!-- BEGIN PUBLIC SKILLS -->
 `aa-skill-router`, `asr3601-cross-branch-porting`, `asr3601-fix-closeout-reporter`, `asr3601-lvgl-firmware-triage`, `asr3601-project-onboard`, `asr3601-protocol-branch-matrix`, `asr3602-local-build-flash`, `asr360x-bug-delivery-orchestrator`, `catstudio-log-extractor`, `codex-ccswitch-mobile`, `codex-clash-proxy`, `obsidian-fix-pattern-memory`, `skill-usage-tracker`, `zentao-bug-resolver`, `zentao-bug-triage`。
+<!-- END PUBLIC SKILLS -->
 
 </details>
+
+<details>
+<summary>当前公开 MCP 元数据</summary>
+
+<!-- BEGIN PUBLIC MCP -->
+`everything-search`。
+<!-- END PUBLIC MCP -->
+
+</details>
+
+每周公开同步的白名单、候选树和 PR 边界见 [公开快照同步](docs/public-sync.md)。
 
 ## 验证边界
 
