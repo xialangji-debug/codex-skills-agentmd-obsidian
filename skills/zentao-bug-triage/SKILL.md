@@ -46,7 +46,7 @@ Use this skill to turn Zentao bugs into a branch-aware triage table before editi
 - Treat short requests such as “看看当前bug”, “当前bug”, “这个分支有哪些bug”, and “看禅道bug” as this workflow when the current workspace or version tokens indicate an ASR3601/ASR3602/360x Crane/LVGL firmware project.
 - Treat requests to open bug IDs, download attachments, refresh snapshots, or inspect `work-items.md` as this workflow.
 - If the user already pasted full bug steps/result/expected text or provided a local attachment path and does not need Zentao fetching, use `asr3601-lvgl-firmware-triage`; re-enter this skill only if additional Zentao history or attachments are needed.
-- Recognize these workspace/version clues: `gui/lv_watch`, the modem product tree, the project version header, `ASR3601`, `ASR3602`, `3601`, `3602`, `360x`, and `crane`. Read concrete product/device tokens only from the private local map or `.codex-project/variant.md`.
+- Recognize these workspace/version clues: `gui/lv_watch`, `product/craneg_modem`, `yl.h`, `yl_device_ver`, `yl_hw_ver`, `ASR3601`, `ASR3602`, `3601`, `3602`, `360x`, `crane`, `TW10`, `TW18`, `C10`, `LT52`, `JC2`, `JC8`.
 - If the same short request appears outside this firmware family, ask one short confirmation before logging in to Zentao.
 - When both `asr3601-lvgl-firmware-triage` and this skill apply, use firmware triage for code reasoning and this skill for Zentao fetching, bug detail snapshots, attachments, classification, and time-vs-commit judgment.
 
@@ -119,7 +119,7 @@ node "$env:USERPROFILE\.codex\skills\zentao-bug-triage\scripts\zentao_bug_snapsh
      - `work-items.md`: bugs Codex should inspect/fix next, candidate fix-pattern paths/evidence, mandatory pre-edit checks, and candidate bugs that have a clear expected result or attachment evidence.
      - `ignored-items.md`: bugs to skip this round, wait for logs/confirmation, or send to platform/driver/hardware owners.
    - Memory linkage is read-only and enabled by default. It indexes Markdown under `%USERPROFILE%\Documents\Obsidian\CodexVault\Codex\fix-patterns`, keeps at most three candidates per bug, and emits `高` / `中` / `低` / `未命中`. Use `--fix-patterns <path>` to override the folder or `--no-memory-link` for an isolated run.
-   - Treat `product`, branch, repo, device name, and version only as context filters. Never mix model/version tokens, `小程序`, `物卡`, `公版`, branch fragments, placeholder detail, or Chinese sliding-window fragments into symptom evidence.
+   - Treat `product`, branch, repo, device name, and version only as context filters. Never mix them into symptom fingerprints or score `LT52`, `小程序`, `物卡`, `公版`, branch fragments, placeholder detail, or Chinese sliding-window fragments as issue evidence.
    - A high match requires an already verified note plus multiple evidence dimensions and a same-project or code-symbol signal. Same device/branch text alone must not produce a match.
    - The deep-fetch command fills `work-items.md` with full detail, history records, latest activation note, and attachment paths. Before later fixing “这些bug”, read the latest or user-specified `work-items.md` first and base the fix on its detail fields and attachments.
    - For bugs assigned to the user regardless of project:

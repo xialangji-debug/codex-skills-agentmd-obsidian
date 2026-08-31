@@ -1301,7 +1301,8 @@ function slug(s) {
 
 function bugDisplayLabel(bug) {
   const id = `${bug?.id ?? ""}`.trim().replace(/^#+\s*/, "").replace(/\|/g, "/") || "ID未获取";
-  const title = oneLine(bug?.title || "标题未获取").replace(/\|/g, "/");
+  const rawTitle = `${bug?.title ?? ""}`.trim();
+  const title = oneLine(rawTitle || "标题未获取").replace(/\|/g, "/");
   return `${id} ${title}`;
 }
 

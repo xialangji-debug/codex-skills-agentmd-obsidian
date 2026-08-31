@@ -1,4 +1,4 @@
 interface:
   display_name: "CATStudio Log Extractor"
-  short_description: "Extract CATStudio zip logs by analysis profile."
-  default_prompt: "Extract the useful logs from this CATStudio zip for AI triage."
+  short_description: "提取、筛选并验收当前 CATStudio 会话中的完整日志证据"
+  default_prompt: "Use $catstudio-log-extractor to extract this CATStudio log and distinguish capture evidence from required business evidence."

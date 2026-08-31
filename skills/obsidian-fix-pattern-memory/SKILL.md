@@ -1,6 +1,6 @@
 ---
 name: obsidian-fix-pattern-memory
-description: Search, create, merge, and update canonical local Obsidian fix-pattern memory with per-project/branch/version target records and independent implementation, verification, and Zentao states. Use for 读取记忆库, 根据记忆, 记一下, every completed behavior-changing fix, 收工更新, similar issues, regressions, cross-branch reuse, device/platform/QA verification, automatic Zentao snapshot transitions, or reactivated bugs that must downgrade one exact target without erasing other verified targets.
+description: Search, create, merge, update, and domain-audit canonical local Obsidian fix-pattern memory with per-project/branch/version target records and independent implementation, verification, and Zentao states. Use for 读取记忆库, 根据记忆, 记一下, every completed behavior-changing fix, 收工更新, similar issues, regressions, cross-branch reuse, ASR/ESP32 domain correction, device/platform/QA verification, automatic Zentao snapshot transitions, or reactivated bugs that must downgrade one exact target without erasing other verified targets.
 ---
 
 # Obsidian Fix Pattern Memory
@@ -91,6 +91,9 @@ python -X utf8 "$env:USERPROFILE\.codex\skills\obsidian-fix-pattern-memory\scrip
 
 New written notes require `--symptoms`, `--root-cause`, and `--fix`. For an exact
 existing match, pass `--note <path>` and only the fields that genuinely changed.
+For a new note, `--domain asr|esp32|none` is explicit authority. Without it, the
+script requires one unambiguous project-key or repository-path match in
+`%USERPROFILE%\.codex\active-projects.json`; it never silently defaults to ASR.
 
 ## Record Evidence Events
 
@@ -137,6 +140,17 @@ python -X utf8 "$env:USERPROFILE\.codex\skills\obsidian-fix-pattern-memory\scrip
 
 Use `migrate --write` only after reviewing the candidate list. Migration adds IDs
 and an empty target matrix; it does not guess historical branches or verification.
+
+Audit domain classification before any historical correction:
+
+```powershell
+python -X utf8 "$env:USERPROFILE\.codex\skills\obsidian-fix-pattern-memory\scripts\fix_memory.py" audit-domains --only-domain esp32
+```
+
+Only after reviewing the exact mismatch list may `--write` be added. Managed
+target project keys are the strongest signal; an explicit ESP32 filename/title is
+also eligible. Ambiguous or neutral notes remain unchanged. `validate` reports
+domain counts, advisory high-confidence mismatches, and hard schema errors.
 
 `new_fix_pattern.py` and `memory_trust.py` remain legacy compatibility tools. Use
 `fix_memory.py` for all new workflows.

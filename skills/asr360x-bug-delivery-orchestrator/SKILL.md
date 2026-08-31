@@ -22,6 +22,15 @@ When intent is ambiguous, start in read-only intake. Do not let a terminal phras
 
 - Treat development-side “关禅道” as mark `已解决`, not QA `关闭`, unless tester authority and closure are explicit.
 - Release only when the user explicitly says `出版本`, `上传`, `fnOS`, or `release`.
+- When the release wording is `快速出版本`, preserve that modifier when handing
+  the release stage to the owner confirmed by the current project index. Use
+  `akq-firmware-release` Quick Release Mode when it is that owner; if no release
+  owner/controller is confirmed, stop and ask rather than borrowing a similar
+  project's script. Quick mode means one owner-controller invocation, no
+  external preflight/post-success checks, and no automatic diagnosis, retry,
+  resume, parameter change, cleanup, or continuation after a failure. Earlier
+  fix/commit/Zentao stages remain authorized only when the user's full request
+  explicitly includes them.
 - Preserve unrelated local changes and record the pre-existing dirty worktree.
 - A successful build does not equal device, platform, or QA verification.
 - Prefer `.codex-project/variant.md` as the canonical variant fingerprint. Refresh it through `asr3601-project-onboard` when missing or stale.
@@ -39,7 +48,8 @@ When intent is ambiguous, start in read-only intake. Do not let a terminal phras
 | Verification, closeout, and validation debt | `asr3601-fix-closeout-reporter` |
 | Canonical fix memory and exact target evidence | `obsidian-fix-pattern-memory` |
 | Explicit Zentao resolution | `zentao-bug-resolver` |
-| Explicit release | Project-local private release workflow from `.codex-project/local.md` |
+| Explicit formal release | Matching release skill, normally `akq-firmware-release` |
+| 出 FOTA / 重新出 FOTA / 正式与FOTA测试双包 | `asr3602-fota-pair-release` directly; its two builds provide build evidence and it uploads only the formal package |
 
 ## Read-Only Intake Mode
 
@@ -75,7 +85,7 @@ git rev-parse --short HEAD
 - Use already-fetched Zentao detail text locally; re-enter `zentao-bug-triage` only when more history or attachments are required.
 - For similar issues, regressions, cross-branch work, or clear error keywords, search only `Codex/fix-patterns/` with 1-3 terms and read only direct matches.
 - For existence questions, inspect likely code entry points and history before proposing a patch.
-- For protocol ambiguity, identify APP, mini-app, vendor, modem/platform, or backend ownership before firmware edits.
+- For protocol ambiguity, identify APP, XCX, YL, AKQ, modem/platform, or backend ownership before firmware edits.
 
 Choose one first-decision label and cite decisive evidence:
 
@@ -146,6 +156,11 @@ python "$env:USERPROFILE\.codex\skills\asr360x-bug-delivery-orchestrator\scripts
 
 6. Release only after all selected bugs reach `zentao_resolved` and the state records an explicit release request:
 
+   For an explicit FOTA-pair request, hand off directly to
+   `asr3602-fota-pair-release`. Do not run an earlier standalone full build and
+   do not probe `delivery_transaction.py` unless this exact project has a
+   verified FOTA delivery profile.
+
 ```powershell
 python "$env:USERPROFILE\.codex\skills\asr360x-bug-delivery-orchestrator\scripts\delivery_state.py" release `
   --repo . --status released --evidence "uploaded release folder and verified artifacts"
@@ -161,7 +176,13 @@ If a wrong-product resolution occurred, stop release progression, reactivate it 
 
 ## Final Delivery Report
 
-Return one row per bug:
+For a successful request containing `快速出版本`, replace the detailed report
+below with one compact completion message containing the requested bug/commit
+result, released version, and upload destination. Do not run extra checks merely
+to populate that message. If the release controller did not succeed, report only
+the failed stage, exact error, known side effects, and decision needed, then wait.
+
+For ordinary delivery requests, return one row per bug:
 
 ```text
 ID | 当前阶段 | 修改 | 验证 | 提交 | 记忆 | 禅道

@@ -42,43 +42,45 @@ Default work-memory behavior:
 
 ## Skill And Project Routing
 
-Choose skills from the current task and available-skill descriptions. Keep detailed procedures inside the owning skill instead of duplicating them in this global file.
+Choose skills from the current task and available-skill descriptions. Keep each procedure in its owning skill.
 
-In a direct Codex project conversation, the primary Codex agent implements a bounded fast fix directly when it is one project, one concrete issue, the current branch, local source only, expected to touch at most five files, and needs no branch switch, device action, release, Zentao write, or local model. This rule takes precedence over the local-worker allowlist. Do not start a nested Codex task, invoke the local worker, poll another task, or run a second closeout workflow for that fast fix.
+When the current repository provides `AGENTS.md` and `.codex-project\index.md`, treat them as the routing authority. Follow the matching local route and read only its linked context; do not run another ASR/ESP32 classifier or load every global index. Use `%USERPROFILE%\.codex\skills-index\index.md` only when local routing is missing or unclear.
 
-For a direct fast fix: check repo/branch/commit/dirty once; preserve and work with unrelated user changes; read up to three relevant memory notes only when explicitly requested or when a regression/similar-issue lookup is required; run one focused code/history search pass; edit directly; inspect the target diff; run `git diff --check` and one narrow test or build; then report the result. When work leaves the fast-fix boundary, keep it in the current Codex task and route each operation to its owning global specialist Skill: Zentao triage/resolution, cross-branch work, local-model execution, build/flash, log capture, release, or closeout. Obtain explicit confirmation only for the risky action that requires it.
+Keep stable repository rules and navigation in `AGENTS.md`, `.codex-project\index.md`, and optional `.codex-project\local.md`. Keep branch, commit, dirty state, product/version, protocol selection, build parameters, device identity, and external-system IDs only in `.codex-project\variant.md`.
 
-Route external bug-system listing, detail retrieval, status reconciliation, and remote writes to the owning skills. Keep product mappings, server details, target identity, and state-transition procedures in local project context or those skills, not in this global file. A local snapshot or memory update never authorizes an external-system write.
+Scale checks with the action:
 
-Use `local-coder-executor` only when the user explicitly requests the local coder/model and approves a bounded implementation plan, and only when the current repository or working directory is inside an enabled root in `%USERPROFILE%\.codex\local-coder-projects.json`. Outside that allowlist, the primary Codex agent implements directly and must not invoke the local worker. Do not bypass this boundary; change the allowlist only when the user explicitly changes the permitted project set.
+- For read-only code lookup or explanation, use current project context and live source. Do not refresh the complete variant or run tool health checks unless the needed evidence is missing or the tool fails.
+- Before a local source edit, check branch, HEAD, and dirty state once and preserve unrelated user changes. The owning implementation skill defines the Fast Fix procedure.
+- For cross-branch, protocol, build, flash, release, device, or external-system work, use the owning specialist skill and refresh any stale dynamic identity it depends on.
+- When one request combines a behavior fix with formal plus FOTA-test delivery,
+  do only narrow source checks before the focused commit. Hand the release stage
+  directly to `asr3602-fota-pair-release`; its sequential T/F builds supply the
+  full build evidence, so do not run a third standalone firmware build first.
 
-- The primary Codex agent owns visual understanding, repository inspection, requirements, planning, product decisions, review, and verification.
-- Delegate only a bounded, self-contained coding task to the configured local worker; run one worker at a time.
-- Translate screenshots and other multimodal evidence into explicit text requirements before delegation. Do not ask the worker to interpret images.
-- After the worker exits, independently inspect the changed files and diff, preserve pre-existing user changes, and run the narrowest relevant tests.
-- Never include credentials, API keys, tokens, or unrelated private context in a worker task.
+Route external bug-system access and remote writes to their owning skills. A local snapshot or memory update never authorizes a branch change, commit, push, device action, release, or external write.
 
-If a required skill is not exposed but exists locally, read:
+For every ASR3601/ASR3602/360x project, the exact phrase `快速出版本` activates
+the shared Quick Release Mode. Route a standalone formal release to the owner
+confirmed by the current project's index; when that owner is
+`akq-firmware-release`, use its Quick Release Mode. If the project has no
+confirmed release owner or controller, stop and ask instead of borrowing a
+similar ASR360x project's script. For a composite request, preserve the same
+mode when handing off the release stage. This modifier requests one direct
+controller run, no controller-external preflight or post-success verification,
+and a concise completion reply. It does not disable the controller's built-in
+gates or authorize commits, staging, stashing, discards, flashing, Zentao
+writes, overwrites, gate bypasses, or recovery actions that the rest of the
+request did not explicitly authorize. If the controller stops or fails, do not
+diagnose, retry, resume, change parameters, clean up, or continue automatically;
+report the failed stage, exact error, known side effects, and the decision
+needed from the user, then wait.
 
-`%USERPROFILE%\.codex\skills\<skill-name>\SKILL.md`
+Use `local-coder-executor` only when the user explicitly requests the local model, approves a bounded implementation plan, and the project is allowlisted in `%USERPROFILE%\.codex\local-coder-projects.json`. Primary Codex retains requirements, visual interpretation, review, and verification; never send credentials or unrelated private context to the worker.
 
-Use `%USERPROFILE%\.codex\skills-index\index.md` only when routing is unclear or the user asks to organize skills. The main index is a one-line catalog; read a domain index only when needed.
+If a required active skill is not exposed, read `%USERPROFILE%\.codex\skills\<skill-name>\SKILL.md`. Use `%USERPROFILE%\.codex\active-projects.json` as the explicit list for cross-project audits.
 
-Prefer project-local context when present:
-
-- `AGENTS.md`
-- `.codex-project\index.md`
-- Other files linked by the project index
-
-Use `%USERPROFILE%\.codex\active-projects.json` as the explicit list for cross-project freshness audits. Do not treat every repository found under Desktop as active.
-
-Run the read-only work architecture gate with `python -X utf8 %USERPROFILE%\.codex\scripts\architecture_audit.py all --skip-life-vault` unless the current request explicitly authorizes a private-life audit. Create a self-verifying control/work-Vault/project-context snapshot with `pwsh -File %USERPROFILE%\.codex\scripts\create_architecture_snapshot.ps1` and a `-SourceSpec` that excludes `LifeVault` after broad architecture changes.
-
-Project context has two layers:
-
-- Keep stable repository rules and navigation in `AGENTS.md` and `.codex-project\index.md`.
-- Keep branch, commit, dirty state, product/version, protocol selection, build parameters, device identity, and external-system IDs only in `.codex-project\variant.md`.
-- Refresh a stale variant before any operation that depends on dynamic target identity, unless the owning skill defines a narrower read-only freshness rule. Do not copy dynamic facts into global instructions or Skill bodies.
+Run the read-only work architecture gate with `python -X utf8 %USERPROFILE%\.codex\scripts\architecture_audit.py all --skip-life-vault` after changes to global Skills, routing indexes, project-context generators, Vault schemas, or other control/knowledge-plane architecture, and when the user explicitly requests an architecture audit. Ordinary firmware fixes, builds, and releases use their project/owner gates and do not run the global architecture audit. After broad architecture changes, create a self-verifying control/work-Vault/project-context snapshot with `pwsh -File %USERPROFILE%\.codex\scripts\create_architecture_snapshot.ps1` and a `-SourceSpec` that excludes `LifeVault`.
 
 Keep active skills flat under `%USERPROFILE%\.codex\skills`; archive inactive skills under `%USERPROFILE%\.codex\skills.disabled`.
 

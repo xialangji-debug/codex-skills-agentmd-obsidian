@@ -121,7 +121,7 @@ lsof -nP -iTCP:15721 -sTCP:LISTEN
 Expected CC Switch log pattern:
 
 ```text
-[Codex] >>> 请求 URL: https://relay.example.invalid/v1/responses (model=...)
+[Codex] >>> 请求 URL: https://example.invalid/v1/responses (model=...)
 ```
 
 If mobile sends a message and no new CC Switch log appears, the active desktop process is not using the expected `~/.codex/config.toml` or the request is being blocked before the model layer.

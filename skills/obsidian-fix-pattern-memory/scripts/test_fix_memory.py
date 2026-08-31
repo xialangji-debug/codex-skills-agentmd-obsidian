@@ -38,6 +38,31 @@ def context(target_id: str, branch: str, verification: str, updated: str) -> dic
 
 
 class FixMemoryTests(unittest.TestCase):
+    def write_registry(self, root: Path) -> Path:
+        registry = root / "active-projects.json"
+        registry.write_text(
+            json.dumps(
+                {
+                    "projects": [
+                        {
+                            "project_key": "esp32_c5",
+                            "family": "esp32",
+                            "path": str(root / "esp32"),
+                            "enabled": True,
+                        },
+                        {
+                            "project_key": "watch",
+                            "family": "asr360x",
+                            "path": str(root / "watch"),
+                            "enabled": True,
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return registry
+
     def test_round_trip_managed_state(self) -> None:
         state = fix_memory.empty_state("FP-TEST")
         state["targets"] = [context("target-a", "main", "build_passed", "2026-08-01T10:00:00+08:00")]
@@ -128,6 +153,83 @@ class FixMemoryTests(unittest.TestCase):
             note = root / "sample.md"
             note.write_text("# Sample\n", encoding="utf-8")
             self.assertEqual(fix_memory.fix_notes(root), [note])
+
+    def test_domain_template_and_frontmatter_round_trip(self) -> None:
+        esp = fix_memory.note_template("ESP32 fix", "FP-ESP", "esp32")
+        neutral = fix_memory.note_template("Tool fix", "FP-TOOL", "none")
+        self.assertEqual(fix_memory.frontmatter_domains(esp), ["esp32"])
+        self.assertEqual(fix_memory.frontmatter_domains(neutral), [])
+        changed = fix_memory.set_frontmatter_domains(esp, "asr")
+        self.assertEqual(fix_memory.frontmatter_domains(changed), ["asr"])
+
+    def test_infer_domain_from_project_key_or_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            registry = self.write_registry(root)
+            domain, _ = fix_memory.infer_domain(str(root / "unknown"), "esp32_c5", registry)
+            self.assertEqual(domain, "esp32")
+            domain, _ = fix_memory.infer_domain(str(root / "watch"), "", registry)
+            self.assertEqual(domain, "asr")
+
+    def test_new_note_requires_explicit_or_inferred_domain(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            registry = self.write_registry(root)
+            args = argparse.Namespace(
+                root=str(root),
+                note="",
+                title="Unknown fix",
+                slug="unknown-fix",
+                repo=str(root / "unknown"),
+                project_key="unknown",
+                repo_id="",
+                branch="main",
+                version="1",
+                variant="",
+                variant_id="",
+                bug=[],
+                commit="",
+                evidence="",
+                symptom_fingerprint="",
+                implementation="applied",
+                verification="static_checked",
+                zentao="unknown",
+                relation="applied",
+                domain="",
+                active_projects=str(registry),
+                write=False,
+                keyword=[],
+                scope=[],
+                symptoms="symptom",
+                root_cause="cause",
+                key_file=[],
+                fix="fix",
+                verification_method="test",
+                caution=[],
+            )
+            with self.assertRaises(SystemExit):
+                fix_memory.command_upsert(args)
+
+    def test_domain_audit_writes_only_selected_high_confidence_domain(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            registry = self.write_registry(root)
+            esp_note = root / "esp32-c5-cache-fix.md"
+            neutral_note = root / "powershell-helper.md"
+            esp_note.write_text(
+                fix_memory.note_template("ESP32-C5 cache fix", "FP-ESP", "asr"),
+                encoding="utf-8",
+            )
+            neutral_note.write_text(
+                fix_memory.note_template("PowerShell helper", "FP-PS", "asr"),
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(
+                root=str(root), active_projects=str(registry), only_domain="esp32", write=True
+            )
+            fix_memory.command_audit_domains(args)
+            self.assertEqual(fix_memory.frontmatter_domains(esp_note.read_text(encoding="utf-8")), ["esp32"])
+            self.assertEqual(fix_memory.frontmatter_domains(neutral_note.read_text(encoding="utf-8")), ["asr"])
 
 
 if __name__ == "__main__":

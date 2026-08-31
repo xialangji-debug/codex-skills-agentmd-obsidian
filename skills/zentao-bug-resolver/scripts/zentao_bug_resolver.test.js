@@ -7,7 +7,7 @@ const path = require("path");
 
 const resolver = require("./zentao_bug_resolver");
 
-assert.strictEqual(typeof resolver.parseArgs, "function");
+assert.doesNotThrow(() => require("playwright"));
 
 const defaults = resolver.parseArgs(["node", "resolver"]);
 assert.strictEqual(defaults.assignTo, "");

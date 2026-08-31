@@ -146,6 +146,23 @@ def discover_skill_records(root: Path, source: str) -> tuple[list[SkillRecord], 
     return records, invalid_dirs
 
 
+def _resolve_active_plugin_version(plugin_root: Path) -> Path | None:
+    """Return the concrete version selected by a valid `latest` link."""
+    latest = plugin_root / "latest"
+    if not latest.exists():
+        return None
+
+    try:
+        resolved_root = plugin_root.resolve(strict=True)
+        resolved_version = latest.resolve(strict=True)
+    except OSError:
+        return None
+
+    if not resolved_version.is_dir() or resolved_version.parent != resolved_root:
+        return None
+    return resolved_version
+
+
 def discover_plugin_records(root: Path | None) -> tuple[list[SkillRecord], list[str]]:
     if root is None:
         return [], []
@@ -153,12 +170,11 @@ def discover_plugin_records(root: Path | None) -> tuple[list[SkillRecord], list[
         return [], [f"missing optional plugin cache: {root}"]
 
     records: list[SkillRecord] = []
+    active_versions: dict[Path, Path | None] = {}
     for skill_md in sorted(root.rglob("SKILL.md"), key=lambda path: str(path).lower()):
         relative = skill_md.relative_to(root)
         parts = relative.parts
-        # Plugin caches expose a `latest` junction beside the concrete version.
-        # Count the concrete version only, otherwise every current plugin looks
-        # like a duplicate registration.
+        # `latest` may be traversed on platforms that follow directory links.
         if "latest" in parts:
             continue
         try:
@@ -168,6 +184,20 @@ def discover_plugin_records(root: Path | None) -> tuple[list[SkillRecord], list[
         if skills_index < 2:
             continue
         plugin_name = parts[1]
+
+        # Versioned caches use provider/plugin/version/skills. When `latest`
+        # selects a valid sibling version, historical versions are cache only,
+        # not additional registrations. Without a valid pointer, retain the
+        # old scan-all behavior so an ambiguous cache remains visible.
+        if skills_index >= 3:
+            plugin_root = root / parts[0] / plugin_name
+            if plugin_root not in active_versions:
+                active_versions[plugin_root] = _resolve_active_plugin_version(plugin_root)
+            active_version = active_versions[plugin_root]
+            version_root = plugin_root / parts[2]
+            if active_version is not None and version_root.resolve() != active_version:
+                continue
+
         raw = validate_skill_record(skill_md, "plugin", managed_plugin=True)
         records.append(
             SkillRecord(

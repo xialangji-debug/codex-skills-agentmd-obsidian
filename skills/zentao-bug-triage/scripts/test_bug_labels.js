@@ -52,7 +52,7 @@ const sample = {
 
 const expectedLabel = "3526 计算机界面向右滑动会有点卡顿";
 assert.strictEqual(triage.bugDisplayLabel(sample), expectedLabel);
-assert.strictEqual(triage.bugDisplayLabel({ id: "#3533", title: "" }), "3533 标题未获取");
+assert.strictEqual(triage.bugDisplayLabel({ id: "#3533", title: "   " }), "3533 标题未获取");
 
 const triageReport = triage.markdownReport(context, [sample]);
 assert.ok(triageReport.includes("| Bug（ID + 标题） |"));

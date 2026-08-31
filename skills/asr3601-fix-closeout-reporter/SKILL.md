@@ -1,6 +1,6 @@
 ---
 name: asr3601-fix-closeout-reporter
-description: Verify and close out ASR3601/ASR3602/360x/Crane SDK/LVGL children-watch firmware fixes, or aggregate explicit validation debt across Obsidian fix-pattern notes. Use for an explicit closeout, multi-step delivery review, ports, release readiness, or when the user asks “修复完了吗”, “怎么验证”, “收工更新”, “禅道标记解决”, “还有哪些没验证”, “待真机”, “验证债务”, “待回归”, or “发布前验收清单”. Do not auto-trigger after a direct Codex Fast Fix, which performs one narrow inline verification and reports without a second closeout pass.
+description: Verify and close out ASR3601/ASR3602/360x/Crane SDK/LVGL children-watch firmware fixes, or aggregate explicit validation debt into project/branch/version Campaigns and a read-only open-loops delta. Use for an explicit closeout, multi-step delivery review, ports, release readiness, or when the user asks “修复完了吗”, “怎么验证”, “收工更新”, “禅道标记解决”, “还有哪些没验证”, “待真机”, “验证债务”, “待回归”, “Campaign”, or “发布前验收清单”. Do not auto-trigger after a direct Codex Fast Fix, which performs one narrow inline verification and reports without a second closeout pass.
 ---
 
 # ASR3601 Fix Verification and Closeout
@@ -32,7 +32,7 @@ Never revert unrelated local changes. Distinguish pre-existing user changes, the
 4. Run targeted `rg` checks for changed symbols, UI text, protocol fields, resources, or guard conditions.
 5. For UI, language, date/time, calendar, dialog, label, or long-text work, run the bundled preflight. It scans changed C/C++ files by default and can include explicit paths. Treat findings as static warnings, not device proof.
 6. Run the narrowest documented build or syntax/object check.
-7. Check relevant boundaries: standard/sport watch, phone/simulator, language/resource pack, and APP/mini-app/vendor/platform.
+7. Check relevant boundaries: standard/sport watch, phone/simulator, language/resource pack, and APP/XCX/YL/AKQ/platform.
 8. Separate static checks, full build/package, release, device regression, platform logs, and QA status. Never promote one layer into another.
 
 Prefer the integrated helper:
@@ -63,6 +63,11 @@ Use `--skip-i18n-preflight` for non-UI work. `--i18n-strict` fails only on high-
 - Use `fix_memory.py event --event device_verified|platform_verified|build_passed`
   with reviewed evidence and `--write`.
 - A build alone may produce `build_passed`; it is not device/platform verification.
+- Verification promotion is evidence-bound: only explicit user confirmation of
+  target-device resolution, a linked bug that has been investigated/fixed and
+  development-closed, or a port from a mature branch with matching traceable
+  device/platform evidence may upgrade a target beyond `build_passed`. Branch
+  similarity, source presence, or a successful package alone is insufficient.
 - For a linked reactivated Bug, use `reactivated_same` only when repository,
   branch, version, variant, and material symptom all match. Otherwise leave the old
   target unchanged and report a variant candidate.
@@ -83,6 +88,33 @@ python "$env:USERPROFILE\.codex\skills\asr3601-fix-closeout-reporter\scripts\val
 - Exclude closed history and report project, branch, commit, passed layers, remaining work, priority, next action, and source note.
 - Never upgrade trust, resolve Zentao, or infer QA completion from a build.
 - `--open-loops-draft <output.md>` writes only the requested standalone draft.
+
+Campaign mode groups managed targets by `domain + project + branch + version +
+variant_id`; legacy notes remain isolated by source and never merge into a managed
+Campaign. Use filters to narrow a review:
+
+```powershell
+python "$env:USERPROFILE\.codex\skills\asr3601-fix-closeout-reporter\scripts\validation_debt_report.py" `
+  --domain asr --project lt52 --branch release --since 2026-08-01 --campaign
+```
+
+`BLOCKED` and `DEVICE_VERIFICATION_PENDING` Campaigns block release readiness;
+`READY_FOR_QA` means device/platform evidence exists and only QA closure remains.
+Counts distinguish debt notes from target rows, so one note with multiple targets
+cannot make the closed count negative.
+
+For open-loop reconciliation, always write a standalone delta:
+
+```powershell
+python "$env:USERPROFILE\.codex\skills\asr3601-fix-closeout-reporter\scripts\validation_debt_report.py" `
+  --campaign `
+  --open-loops "$env:USERPROFILE\Documents\Obsidian\CodexVault\Codex\agent\open-loops.md" `
+  --open-loops-delta "$env:TEMP\validation-open-loops-delta.md"
+```
+
+Only entries carrying a `validation-debt` marker are reconciled. Do not edit the
+canonical `open-loops.md` automatically; human-authored unmarked items stay out of
+the machine delta.
 
 ## Required Report
 
@@ -128,4 +160,4 @@ After explicit confirmation, enter `zentao-bug-resolver`. For current-branch fix
 - `scripts/closeout_snapshot.py`: integrated variant, Git, staged/unstaged diff, targeted search, LVGL preflight, optional build, and report-template snapshot.
 - `scripts/lvgl_i18n_preflight.py`: read-only LVGL v7 localization/long-text heuristic scan.
 - `scripts/verify_asr_fix.py`: compatibility wrapper for the integrated snapshot.
-- `scripts/validation_debt_report.py`: read-only validation-debt report unless a draft output is explicitly supplied.
+- `scripts/validation_debt_report.py`: read-only validation-debt/Campaign report with optional standalone drafts and JSON outputs.

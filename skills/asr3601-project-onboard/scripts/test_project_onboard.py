@@ -119,4 +119,26 @@ with tempfile.TemporaryDirectory(prefix="project-onboard-variant-") as temp:
     assert "branch：`sample_lz_3602_20260102`" in second
     assert ".codex-project/variant.md" in refresh.stdout.split("written=", 1)[-1]
 
+with tempfile.TemporaryDirectory(prefix="project-onboard-app-") as temp:
+    repo = Path(temp) / "example_app_firmware"
+    yl_dir = repo / "gui" / "lv_watch" / "lv_apps" / "yl"
+    yl_dir.mkdir(parents=True)
+    (yl_dir / "yl.h").write_text(
+        '#define yl_device_name "LT52"\n'
+        '#define yl_device_ver "LT52_YD_ASR3602_TW18_APP_TEST"\n'
+        '#define yl_hw_ver "LT52_YouDao"\n',
+        encoding="utf-8",
+    )
+    branch = "TW18_LT52_3602_有道APP定制腕表20260813"
+    subprocess.run(["git", "init", "-q", "-b", branch, str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "base"], check=True)
+    write = run_script(repo, "--write")
+    assert write.returncode == 0, write.stderr or write.stdout
+    variant = (repo / ".codex-project" / "variant.md").read_text(encoding="utf-8")
+    assert "协议：`LT52 APP协议`" in variant
+    assert "协议优先级：`APP协议 > 平台协议 > 公共固件逻辑`" in variant
+
 print("project onboard tests passed")

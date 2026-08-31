@@ -200,6 +200,8 @@ def match_mapping(info: RepoInfo) -> Mapping:
 def product_family(info: RepoInfo) -> str:
     text = " ".join([info.name, info.branch, info.yl_device_name, info.yl_device_ver, info.yl_hw_ver]).upper()
     device = info.yl_device_name if info.yl_device_name != "不可用" else ""
+    if "C10" in text and "TW10" in text:
+        return "C10/TW10"
     if device:
         return device
     return "360x"
@@ -208,6 +210,9 @@ def product_family(info: RepoInfo) -> str:
 def protocol_profile(info: RepoInfo) -> tuple[str, str]:
     raw = " ".join([info.name, info.branch, info.yl_device_name, info.yl_device_ver, info.yl_hw_ver])
     text = raw.lower()
+    identity_text = " ".join(
+        [info.branch, info.yl_device_name, info.yl_device_ver, info.yl_hw_ver]
+    ).lower()
     family = product_family(info)
 
     if "3603" in text and "app" in text:
@@ -215,7 +220,7 @@ def protocol_profile(info: RepoInfo) -> tuple[str, str]:
 
     if "lz" in text or "乐智" in raw or "电信" in raw:
         return f"{family} 电信乐智协议", "电信乐智协议 > 平台协议 > 公共固件逻辑"
-    if "app" in text and "xcx" not in text:
+    if "app" in identity_text:
         return f"{family} APP协议", "APP协议 > 平台协议 > 公共固件逻辑"
 
     if "物卡" in raw or "wk" in text:
@@ -239,14 +244,14 @@ def build_command(info: RepoInfo) -> tuple[str, str]:
             "make craneg_modem_watch TARGET_OS=ALIOS PS_MODE=LITE_LTEONLY CHIP_ID=CRANEL",
             "用户确认过的 3602 默认构建命令；如具体分支验证为 THREADX，以本项目 variant.md 更新为准。",
         )
-    if "app" in text and "3602" in text:
+    if "app" in text and "lt52" in text:
         return (
             "make craneg_modem_watch TARGET_OS=THREADX PS_MODE=LITE_LTEONLY CHIP_ID=CRANEL",
-            "通用 3602 APP 构建候选；实际参数以项目本地 build.md 为准。",
+            "用户确认过的 LT52 APP 公版编译命令。",
         )
     return (
         "make craneg_modem_watch TARGET_OS=ALIOS PS_MODE=LITE_LTEONLY CHIP_ID=CRANEL",
-        "通用 3602 默认构建候选；产品例外只记录在项目本地 build.md。",
+        "用户确认过的 3602 默认构建命令；LT52 APP 公版单独使用 THREADX。",
     )
 
 
@@ -338,7 +343,8 @@ Current branch, commit, dirty state, product identity, protocol, build parameter
 | CATStudio / 日志 | `catstudio-log-extractor` |
 | 验证 / 收工 / 解决说明 / 验证债务 | `asr3601-fix-closeout-reporter` |
 | 编译 / 刷机 | `asr3602-local-build-flash` + `.codex-project/build.md` + `.codex-project/device.md` |
-| 正式发布 / 上传 | `.codex-project/local.md` 指定的私有发布流程 |
+| 出 FOTA / 重新出 FOTA / FOTA 测试双包 | `asr3602-fota-pair-release`；组合修复请求直接交给该 owner，不先运行通用事务控制器 |
+| 正式发布 / 上传 | `akq-firmware-release` |
 | 变体确认 / 客户能力边界 | `.codex-project/variant.md` |
 | 类似问题/修复记忆 | `.codex-project/memory.md` |
 
@@ -382,6 +388,7 @@ node \"{PLUGIN_ZENTAO_SCRIPT}\" --repo . --bug-status unresolved --detail-limit 
 ## 使用规则
 
 - 修复后优先跑最小验证；涉及共用逻辑、协议、UI 状态机或出版本前，再跑全量构建。
+- 同一请求还要生成正式/FOTA测试双包时，不提前做第三次完整构建；顺序 T/F 构建同时作为修复的构建证据。
 - 全量构建前先执行 `git status --short`，不要忽略未跟踪源码文件。
 - 构建前重新核对 `variant.md` 与当前仓库；指纹过期时先刷新项目上下文。
 - 如果已记录命令在本项目失败，修正证据来源并重新生成 `variant.md`，不要把当前分支参数写回本文件或全局 Skill。

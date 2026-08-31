@@ -1,11 +1,11 @@
 ---
 name: asr3601-protocol-branch-matrix
-description: Maintain and use the local ASR3601/Crane SDK protocol reference library for APP, mini-app, vendor, platform, and branch-support questions. Use when the user provides protocol PDFs/DOCX/XLSX/images/text to save or update, asks whether a report follows the protocol, which path owns it, whether it is platform-side or firmware-side, whether the current version supports it, or whether a branch can receive the change. Route concrete bug fixes to asr3601-lvgl-firmware-triage, cross-branch ports to asr3601-cross-branch-porting, and pure Zentao fetching/listing to zentao-bug-triage.
+description: Maintain and use the local ASR3601/Crane SDK protocol reference library for APP, XCX/小程序, YL, AKQ, platform, and branch-support questions. Use when the user provides protocol PDFs/DOCX/XLSX/images/text to save or update, asks “这个上报符合协议吗”, “APP协议/小程序协议/YL/AKQ 是哪条路径”, “平台侧还是代码原因”, “当前版本有没有支持这个协议”, “这个分支能不能移植/是否已经合入”, or needs protocol evidence compared with current ASR3601 firmware code. Route concrete bug fixes to asr3601-lvgl-firmware-triage, cross-branch ports to asr3601-cross-branch-porting, and pure Zentao fetching/listing to zentao-bug-triage.
 ---
 
 # ASR3601 Protocol Branch Matrix
 
-Use this skill as the protocol and branch-support front door. It keeps protocol documents in the user's Obsidian vault and uses them to decide whether a behavior belongs to firmware code, APP/mini-app/vendor protocol mismatch, platform parsing, or branch/product support.
+Use this skill as the protocol and branch-support front door. It keeps protocol documents in the user's Obsidian vault and uses them to decide whether a behavior belongs to firmware code, APP/XCX/YL/AKQ protocol mismatch, platform parsing, or branch/product support.
 
 ## Fixed Paths
 
@@ -21,7 +21,7 @@ Required files:
 raw\        original protocol files, never overwritten
 extracted\  searchable Markdown/text extracted from originals
 index.md    file versions, applicability, keywords, source mapping
-matrix.md   APP / mini-app / vendor / platform path and branch matrix
+matrix.md   APP / XCX / YL / AKQ / platform path and branch matrix
 ```
 
 Do not store credentials, API keys, passwords, tokens, or private login material.
@@ -36,7 +36,7 @@ When the user sends a new or updated protocol file:
    - DOCX/XLSX: use structured document/spreadsheet tooling when available.
    - Image/screenshot: visually inspect and transcribe only the relevant protocol fields.
 3. Update `index.md` with protocol name, version/date, original file, extracted file, applicable project/branch/path, keywords, and replacement relationship.
-4. Update `matrix.md` when the protocol changes APP, mini-app, vendor, platform, branch support, command fields, report functions, or known caveats.
+4. Update `matrix.md` when the protocol changes APP, XCX/小程序, YL, AKQ, platform, branch support, command fields, report functions, or known caveats.
 5. Preserve old versions. Mark superseded versions in `index.md` instead of overwriting them.
 
 If extraction is incomplete, record the gap in `index.md` and continue with the usable evidence.
@@ -49,7 +49,7 @@ For “是否符合协议/哪边问题/当前分支是否支持”:
    - APP
    - XCX / 小程序
    - YL
-   - vendor protocol
+   - AKQ
    - platform/common backend
    - unknown, needs evidence
 2. Search `index.md`, `matrix.md`, and only the relevant extracted protocol files with concrete terms from the user request:
@@ -69,10 +69,10 @@ git rev-parse --short HEAD
    Read `.codex-project/variant.md` first when present. Confirm repo, branch, commit, `yl_device_ver`, chip, OS, protocol, customer/product variant, build parameters, and Zentao mapping. If the fingerprint disagrees with current Git or `yl.h`, refresh it with `asr3601-project-onboard` and do not reuse the stale protocol conclusion.
 
 4. Search firmware code by stable clues from the protocol, not by broad guesses:
-   - APP/mini-app/vendor keywords
+   - APP/XCX/YL/AKQ keywords
    - report/event/function names
    - field names and enum values
-   - known project terms discovered from the current checkout and private project context; do not bundle customer-specific identifiers
+   - known project terms such as `akq_xcx_protocal`, `yl`, `ylsc_show`, `AquaBot`, `IMEI`, `ICCID`, `location`, `battery`, `SIM`
 5. Decide with one of these labels:
    - 固件未发送
    - 固件发送字段不一致
@@ -91,7 +91,7 @@ Always cite decisive evidence: protocol file/version, `matrix.md` row, code file
 - Current-branch firmware code fix: use `asr3601-lvgl-firmware-triage` after this skill frames the protocol conclusion.
 - Cross-branch or sibling-project migration: use `asr3601-cross-branch-porting` after identifying source/target protocol support.
 - Verified reusable protocol fixes: update `Codex\fix-patterns\` through `obsidian-fix-pattern-memory` unless the user says not to record.
-- Release packaging: use the project-local private release workflow; this skill only decides protocol support and evidence.
+- Release packaging for AKQ: use `akq-firmware-release`; this skill only decides protocol support and evidence.
 
 ## Output Shape
 

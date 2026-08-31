@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -48,6 +49,12 @@ class Debt:
     pending: tuple[str, ...]
     priority: str
     next_action: str
+    domain: str = "none"
+    version: str = "unknown"
+    variant_id: str = ""
+    target_id: str = ""
+    updated_at: str = ""
+    legacy: bool = False
 
 
 def clean_value(value: str) -> str:
@@ -57,6 +64,32 @@ def clean_value(value: str) -> str:
 
 def unique(values: list[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(value for value in values if value))
+
+
+def frontmatter_domain(text: str) -> str:
+    match = re.match(r"\A---\r?\n(.*?)\r?\n---\r?\n", text, re.S)
+    if not match:
+        return "none"
+    yaml = match.group(1)
+    field = re.search(r"^domains:[ \t]*(.*?)[ \t]*$", yaml, re.M)
+    if not field:
+        return "none"
+    inline = field.group(1).strip()
+    if inline == "[]":
+        return "none"
+    if inline:
+        values = [item.strip().strip("'\"") for item in inline.strip("[]").split(",") if item.strip()]
+    else:
+        tail = yaml[field.end() :]
+        values = []
+        for line in tail.splitlines():
+            item = re.match(r"^\s+-\s*(.+?)\s*$", line)
+            if item:
+                values.append(item.group(1).strip().strip("'\""))
+                continue
+            if line.strip() and not line.startswith((" ", "\t")):
+                break
+    return values[0] if len(values) == 1 and values[0] in {"asr", "esp32"} else "none"
 
 
 def extract_passed_gates(status: str) -> tuple[str, ...]:
@@ -152,6 +185,7 @@ def next_action_for(title: str, status: str, pending: tuple[str, ...]) -> str:
 
 def parse_note(path: Path) -> tuple[Debt | None, bool]:
     text = path.read_text(encoding="utf-8-sig", errors="replace")
+    domain = frontmatter_domain(text)
     lines = text.splitlines()
     status_hits: list[tuple[int, str]] = []
     for index, line in enumerate(lines):
@@ -195,6 +229,8 @@ def parse_note(path: Path) -> tuple[Debt | None, bool]:
             pending=pending,
             priority=classify_priority(status, passed, pending),
             next_action=next_action_for(title, status, pending),
+            domain=domain,
+            legacy=True,
         ),
         True,
     )
@@ -218,6 +254,7 @@ def managed_debts(path: Path, text: str, state: dict) -> list[Debt]:
     if title_match:
         title = clean_value(title_match.group(1))
     debts: list[Debt] = []
+    domain = frontmatter_domain(text)
     for target in state.get("targets") or []:
         relation = target.get("relation", "candidate")
         implementation = target.get("implementation", "not_applied")
@@ -273,6 +310,11 @@ def managed_debts(path: Path, text: str, state: dict) -> list[Debt]:
                 pending=pending,
                 priority=priority,
                 next_action=next_action,
+                domain=domain,
+                version=target.get("version") or "unknown",
+                variant_id=target.get("variant_id") or "",
+                target_id=target.get("target_id") or "",
+                updated_at=target.get("updated_at") or "",
             )
         )
     return debts
@@ -298,20 +340,96 @@ def scan(root: Path) -> tuple[list[Debt], int, int]:
     return debts, len(files), explicit_count
 
 
+def filter_debts(
+    debts: list[Debt],
+    domain: str = "all",
+    project: str = "",
+    branch: str = "",
+    priority: str = "",
+    since: str = "",
+) -> list[Debt]:
+    project_key = project.casefold()
+    branch_key = branch.casefold()
+    return [
+        debt
+        for debt in debts
+        if (domain == "all" or debt.domain == domain)
+        and (not project_key or project_key in debt.project.casefold())
+        and (not branch_key or branch_key in debt.branch.casefold())
+        and (not priority or debt.priority == priority)
+        and (not since or (bool(debt.updated_at) and debt.updated_at[:10] >= since))
+    ]
+
+
+def campaign_key(debt: Debt) -> str:
+    if debt.legacy:
+        return f"legacy|{debt.domain}|{debt.source.name}"
+    return "|".join([debt.domain, debt.project, debt.branch, debt.version, debt.variant_id])
+
+
+def build_campaigns(debts: list[Debt]) -> list[dict]:
+    grouped: dict[str, list[Debt]] = {}
+    for debt in debts:
+        grouped.setdefault(campaign_key(debt), []).append(debt)
+    campaigns: list[dict] = []
+    for key, rows in sorted(grouped.items()):
+        priorities = sorted({row.priority for row in rows})
+        pending = sorted({item for row in rows for item in row.pending})
+        passed = sorted({item for row in rows for item in row.passed_gates})
+        statuses = " ".join(row.status for row in rows)
+        hard_block = "P0" in priorities or bool(re.search(r"needs_review|unverified|failed", statuses))
+        device_pending = any("真机" in item or "设备" in item for item in pending)
+        if hard_block:
+            state = "BLOCKED"
+        elif device_pending:
+            state = "DEVICE_VERIFICATION_PENDING"
+        else:
+            state = "READY_FOR_QA"
+        campaigns.append(
+            {
+                "campaign_id": "VC-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:12].upper(),
+                "domain": rows[0].domain,
+                "project": rows[0].project,
+                "branch": rows[0].branch,
+                "version": rows[0].version,
+                "variant_id": rows[0].variant_id or None,
+                "legacy": rows[0].legacy,
+                "state": state,
+                "release_blocked": state in {"BLOCKED", "DEVICE_VERIFICATION_PENDING"},
+                "priorities": priorities,
+                "passed_gates": passed,
+                "pending": pending,
+                "target_ids": sorted({row.target_id for row in rows if row.target_id}),
+                "required_commits": sorted({row.commit for row in rows if row.commit != "未记录"}),
+                "source_notes": sorted({row.source.name for row in rows}),
+                "next_actions": sorted({row.next_action for row in rows}),
+            }
+        )
+    return campaigns
+
+
 def md_cell(value: str) -> str:
     return value.replace("|", "\\|").replace("\n", " ")
 
 
-def render_report(debts: list[Debt], root: Path, file_count: int, explicit_count: int) -> str:
-    closed_count = explicit_count - len(debts)
+def render_report(
+    debts: list[Debt],
+    root: Path,
+    file_count: int,
+    explicit_count: int,
+    filtered: bool = False,
+) -> str:
+    debt_note_count = len({debt.source for debt in debts})
+    closed_count = max(0, explicit_count - debt_note_count)
     lines = [
         "# ASR360x 验证债务报告",
         "",
         f"- 扫描目录：{root}",
         f"- Markdown 文件：{file_count}",
         f"- 含显式验证状态：{explicit_count}",
-        f"- 当前验证债务：{len(debts)}",
-        f"- 已闭环排除：{closed_count}",
+        f"- 当前债务笔记：{debt_note_count}",
+        f"- 当前债务目标行：{len(debts)}",
+        f"- 已闭环笔记：{'未计算（过滤模式）' if filtered else closed_count}",
         "- 判定规则：每篇笔记只采纳最后一个“验证状态/验证结论”字段；正文中的历史验证说明不重新开债。",
         "",
     ]
@@ -347,6 +465,33 @@ def render_report(debts: list[Debt], root: Path, file_count: int, explicit_count
     return "\n".join(lines)
 
 
+def render_campaign_report(campaigns: list[dict]) -> str:
+    lines = [
+        "# 验证债务 Campaign",
+        "",
+        f"- Campaign 数：{len(campaigns)}",
+        f"- 发布阻断：{sum(bool(item['release_blocked']) for item in campaigns)}",
+        "- 分组键：domain + project + branch + version + variant；legacy 笔记按来源隔离。",
+        "",
+        "| Campaign | 域 | 项目 | 分支 | 版本 | 状态 | 发布阻断 | 目标数 | 来源 |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for item in campaigns:
+        row = [
+            item["campaign_id"],
+            item["domain"],
+            item["project"],
+            item["branch"],
+            item["version"],
+            item["state"],
+            "是" if item["release_blocked"] else "否",
+            str(len(item["target_ids"]) or len(item["source_notes"])),
+            "、".join(item["source_notes"]),
+        ]
+        lines.append("| " + " | ".join(md_cell(value) for value in row) + " |")
+    return "\n".join(lines) + "\n"
+
+
 def render_open_loops_draft(debts: list[Debt], root: Path) -> str:
     lines = [
         "# Open Loops 验证债务草案",
@@ -361,9 +506,10 @@ def render_open_loops_draft(debts: list[Debt], root: Path) -> str:
         lines.append("- 暂无带显式状态的当前验证债务。")
         return "\n".join(lines) + "\n"
     for debt in debts:
+        debt_id = debt.target_id or debt.source.name
         lines.extend(
             [
-                f"- [ ] [{debt.priority}] {debt.title}",
+                f"- [ ] [{debt.priority}] {debt.title} <!-- validation-debt:{debt_id} -->",
                 f"  - 项目：{debt.project}",
                 f"  - 分支 / commit：{debt.branch} / {debt.commit}",
                 f"  - 已过门槛：{'；'.join(debt.passed_gates)}",
@@ -372,6 +518,44 @@ def render_open_loops_draft(debts: list[Debt], root: Path) -> str:
                 f"  - 来源：{debt.source.name}",
             ]
         )
+    return "\n".join(lines) + "\n"
+
+
+def render_open_loops_delta(debts: list[Debt], root: Path, existing_text: str) -> str:
+    marker_re = re.compile(r"<!--\s*validation-debt:([^>]+?)\s*-->")
+    existing_ids = {match.group(1).strip() for match in marker_re.finditer(existing_text)}
+    current = {debt.target_id or debt.source.name: debt for debt in debts}
+    added = sorted(set(current) - existing_ids)
+    still_open = sorted(set(current) & existing_ids)
+    stale = sorted(existing_ids - set(current))
+    lines = [
+        "# Open Loops 验证债务差异草稿",
+        "",
+        f"> 来源：{root}",
+        "> 只对带 `validation-debt` 标识的条目做机器对账；未带标识的人工条目不判断、不修改。",
+        "",
+        f"- 新增：{len(added)}",
+        f"- 仍开放：{len(still_open)}",
+        f"- 疑似过期：{len(stale)}",
+        "",
+        "## 新增",
+        "",
+    ]
+    if not added:
+        lines.append("- 无")
+    for debt_id in added:
+        debt = current[debt_id]
+        lines.append(f"- [ ] [{debt.priority}] {debt.title} <!-- validation-debt:{debt_id} -->")
+        lines.append(f"  - 下一动作：{debt.next_action}")
+        lines.append(f"  - 来源：{debt.source.name}")
+    lines.extend(["", "## 仍开放", ""])
+    lines.extend(f"- {debt_id}" for debt_id in still_open)
+    if not still_open:
+        lines.append("- 无")
+    lines.extend(["", "## 疑似过期", ""])
+    lines.extend(f"- {debt_id}" for debt_id in stale)
+    if not stale:
+        lines.append("- 无")
     return "\n".join(lines) + "\n"
 
 
@@ -388,6 +572,15 @@ def parse_args() -> argparse.Namespace:
         "--open-loops-draft",
         help="Optional output path for a standalone open-loops Markdown draft. No file is written by default.",
     )
+    parser.add_argument("--domain", choices=["all", "asr", "esp32", "none"], default="all")
+    parser.add_argument("--project", default="", help="Case-insensitive project substring filter.")
+    parser.add_argument("--branch", default="", help="Case-insensitive branch substring filter.")
+    parser.add_argument("--priority", choices=["", "P0", "P1", "P2"], default="")
+    parser.add_argument("--since", default="", help="Managed-target lower date bound in YYYY-MM-DD form.")
+    parser.add_argument("--campaign", action="store_true", help="Append grouped validation Campaign output.")
+    parser.add_argument("--campaign-json", help="Optional output path for machine-readable Campaign JSON.")
+    parser.add_argument("--open-loops", help="Existing canonical open-loops.md to compare read-only.")
+    parser.add_argument("--open-loops-delta", help="Output path for the standalone open-loops delta draft.")
     return parser.parse_args()
 
 
@@ -397,14 +590,44 @@ def main() -> int:
     if not root.is_dir():
         raise SystemExit(f"fix-patterns directory does not exist: {root}")
 
-    debts, file_count, explicit_count = scan(root)
-    print(render_report(debts, root, file_count, explicit_count))
+    if args.since and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.since):
+        raise SystemExit("--since must use YYYY-MM-DD")
+    if bool(args.open_loops) != bool(args.open_loops_delta):
+        raise SystemExit("--open-loops and --open-loops-delta must be provided together")
+
+    all_debts, file_count, explicit_count = scan(root)
+    debts = filter_debts(
+        all_debts,
+        domain=args.domain,
+        project=args.project,
+        branch=args.branch,
+        priority=args.priority,
+        since=args.since,
+    )
+    filtered = any([args.domain != "all", args.project, args.branch, args.priority, args.since])
+    print(render_report(debts, root, file_count, explicit_count, filtered=filtered))
+
+    campaigns = build_campaigns(debts)
+    if args.campaign:
+        print("\n" + render_campaign_report(campaigns))
+    if args.campaign_json:
+        campaign_path = Path(args.campaign_json).expanduser().resolve()
+        campaign_path.parent.mkdir(parents=True, exist_ok=True)
+        campaign_path.write_text(json.dumps({"campaigns": campaigns}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"\nCampaign JSON written: {campaign_path}")
 
     if args.open_loops_draft:
         draft_path = Path(args.open_loops_draft).expanduser().resolve()
         draft_path.parent.mkdir(parents=True, exist_ok=True)
         draft_path.write_text(render_open_loops_draft(debts, root), encoding="utf-8")
         print(f"\nOpen-loops draft written: {draft_path}")
+    if args.open_loops_delta:
+        existing_path = Path(args.open_loops).expanduser().resolve()
+        existing_text = existing_path.read_text(encoding="utf-8-sig", errors="replace")
+        delta_path = Path(args.open_loops_delta).expanduser().resolve()
+        delta_path.parent.mkdir(parents=True, exist_ok=True)
+        delta_path.write_text(render_open_loops_delta(debts, root, existing_text), encoding="utf-8")
+        print(f"\nOpen-loops delta written: {delta_path}")
     return 0
 
 

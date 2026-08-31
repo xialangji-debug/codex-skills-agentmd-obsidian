@@ -13,6 +13,15 @@ Other skills submit evidence or status events through `scripts/fix_memory.py`.
 - `target_id` hashes `repo_id + branch + version + variant_id`.
 - `bug_ids` associates one target application with one or more external Bug IDs.
 
+## Domain
+
+- `domains: [asr]` and `domains: [esp32]` identify firmware-family memory.
+- `domains: []` is reserved for tooling/control-plane fixes with no firmware family.
+- New notes use explicit `--domain` or an exact enabled-project mapping. Never
+  infer ASR merely because it was the historical default.
+- Historical writeback is limited to reviewed, high-confidence mismatches;
+  uncertain notes are reported but not changed.
+
 ## Independent State Axes
 
 | Axis | Values |
