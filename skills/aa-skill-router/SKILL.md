@@ -24,7 +24,6 @@ Use the smallest applicable fallback:
 | Skill routing is still unclear | Read only the matching domain entry from `%USERPROFILE%\.codex\skills-index\index.md` |
 | Cross-project or cross-branch change | The owning porting/integration skill; for ASR360x use `asr3601-cross-branch-porting` |
 | Skill cleanup, trigger failure, or index synchronization | `skill-usage-tracker` and its read-only `registry-audit` first |
-| Explicit local-model implementation | `local-coder-executor`, only after its authorization and allowlist gates |
 | Ordinary explanation outside a specialist workflow | Normal assistant behavior in the active project |
 
 ## Boundaries

@@ -33,7 +33,7 @@ Use Fast Fix when the request is one concrete current-branch issue in one reposi
 3. Use one focused code/index search and, when useful, one focused Git history query.
 4. Make the smallest correct current-branch edit directly with primary Codex.
 5. Inspect the target diff, run `git diff --check`, and run one narrow documented test or build. If the same authorized request immediately continues into formal/FOTA-test pair delivery, do not run a standalone full firmware build here; the pair controller's T/F builds provide that evidence.
-6. Report using the triage shape below. Do not start an inner task, invoke `local-coder-executor`, or run a second closeout workflow.
+6. Report using the triage shape below. Do not start an inner task or run a second closeout workflow.
 
 After a qualifying behavior-changing fix, invoke `obsidian-fix-pattern-memory` once. Static or build evidence remains working evidence, never device or QA proof. If scope grows beyond five files, explain the new scope; route branch, device, release, or remote-write operations to their owning specialist.
 

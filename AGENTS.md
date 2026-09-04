@@ -76,8 +76,6 @@ diagnose, retry, resume, change parameters, clean up, or continue automatically;
 report the failed stage, exact error, known side effects, and the decision
 needed from the user, then wait.
 
-Use `local-coder-executor` only when the user explicitly requests the local model, approves a bounded implementation plan, and the project is allowlisted in `%USERPROFILE%\.codex\local-coder-projects.json`. Primary Codex retains requirements, visual interpretation, review, and verification; never send credentials or unrelated private context to the worker.
-
 If a required active skill is not exposed, read `%USERPROFILE%\.codex\skills\<skill-name>\SKILL.md`. Use `%USERPROFILE%\.codex\active-projects.json` as the explicit list for cross-project audits.
 
 Run the read-only work architecture gate with `python -X utf8 %USERPROFILE%\.codex\scripts\architecture_audit.py all --skip-life-vault` after changes to global Skills, routing indexes, project-context generators, Vault schemas, or other control/knowledge-plane architecture, and when the user explicitly requests an architecture audit. Ordinary firmware fixes, builds, and releases use their project/owner gates and do not run the global architecture audit. After broad architecture changes, create a self-verifying control/work-Vault/project-context snapshot with `pwsh -File %USERPROFILE%\.codex\scripts\create_architecture_snapshot.ps1` and a `-SourceSpec` that excludes `LifeVault`.

@@ -45,8 +45,6 @@ python -X utf8 "%USERPROFILE%\.codex\skills\skill-usage-tracker\scripts\skill_us
 | ASR3602 本地构建刷机 | `asr3602-local-build-flash` |
 | 多 Bug 修复、中文提交、记忆、禅道解决和显式发布编排 | `asr360x-bug-delivery-orchestrator` |
 | CATStudio 离线日志提取 | `catstudio-log-extractor` |
-| CC Switch 手机远程与网络诊断 | `codex-ccswitch-mobile` |
-| Codex 命令级 Clash 代理 | `codex-clash-proxy` |
 | Obsidian 根因记忆、目标矩阵和验证状态 | `obsidian-fix-pattern-memory` |
 | Skill 使用统计与注册审计 | `skill-usage-tracker` |
 | 禅道 Bug 标记已解决 | `zentao-bug-resolver` |

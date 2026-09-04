@@ -184,7 +184,7 @@ node "$env:USERPROFILE\.codex\skills\zentao-bug-triage\scripts\zentao_bug_snapsh
    - For selected UI/app/protocol bugs, check whether the issue exists in the current checkout before proposing changes.
    - For low-level bugs, report required device evidence instead of editing.
    - When reporting after code inspection, include: Zentao evidence, code evidence, commit/time evidence, conclusion, needed logs/videos, and whether Codex should fix it now.
-   - Stop after the diagnosis and proposed behavior unless the user approves implementation. Primary Codex implements an approved bounded fix directly. Use `local-coder-executor` only when the user explicitly requests the local model and approves a bounded implementation plan; never invoke the worker from a list-only snapshot.
+   - Stop after the diagnosis and proposed behavior unless the user approves implementation. Primary Codex implements an approved bounded fix directly.
 
 ## Resources
 

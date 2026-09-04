@@ -11,7 +11,6 @@ Use this index only when skill routing is unclear, a named skill is not visible 
 | Firmware release, fnOS upload, build/package release | `release/index.md` |
 | Obsidian fix-patterns, memory updates | `memory/index.md` |
 | Archived or disabled skills | `archive/index.md` |
-| Explicit local-model implementation inside allowlisted projects | `local-coder-executor`; primary Codex plans and reviews |
 | Skill registry drift, stale routes, trigger failures | Run active `skill-usage-tracker` command `registry-audit`, then read this index only if routing remains unclear |
 
 Keep specialist skills flat under `%USERPROFILE%\.codex\skills`. Primary Codex coordinates multi-step work by invoking the owning global Skill for each operation.
