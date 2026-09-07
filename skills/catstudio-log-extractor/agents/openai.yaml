@@ -1,4 +1,4 @@
 interface:
   display_name: "CATStudio Log Extractor"
-  short_description: "提取、筛选并验收当前 CATStudio 会话中的完整日志证据"
-  default_prompt: "Use $catstudio-log-extractor to extract this CATStudio log and distinguish capture evidence from required business evidence."
+  short_description: "按需提取离线日志、抓当前会话或接收明确请求的 Dump"
+  default_prompt: "Use $catstudio-log-extractor to choose one narrow log mode, extract the relevant evidence, and keep capture proof separate from business proof."

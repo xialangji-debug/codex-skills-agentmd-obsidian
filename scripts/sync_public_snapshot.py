@@ -71,6 +71,7 @@ def load_manifest(path: Path) -> dict[str, object]:
         "repository",
         "global_files",
         "skills",
+        "retired_skills",
         "mcp_packages",
         "exclude_globs",
     }
@@ -84,6 +85,26 @@ def load_manifest(path: Path) -> dict[str, object]:
     if not isinstance(repository, str) or not GITHUB_REPOSITORY.fullmatch(repository):
         raise SyncError("manifest repository must be an HTTPS GitHub repository URL")
     return manifest
+
+
+def public_index(skills: list[str]) -> bytes:
+    lines = [
+        "# Public Skill Index",
+        "",
+        "Generated from public-sync-manifest.json. Use the current task and each",
+        "Skill's description to choose its owner. Project-local routing takes priority.",
+        "",
+        "| Task Area | Skill | Instructions |",
+        "| --- | --- | --- |",
+    ]
+    lines.extend(f"| {name.replace('-', ' ')} | `{name}` | [SKILL.md](../skills/{name}/SKILL.md) |" for name in skills)
+    lines.extend([
+        "",
+        "Release controllers, device supervisors, private configuration, system Skills,",
+        "and plugins are installed separately when required by a project's routing.",
+        "",
+    ])
+    return "\n".join(lines).encode("utf-8")
 
 
 def is_excluded(relative: Path, patterns: list[str]) -> bool:
@@ -192,6 +213,20 @@ def build_candidate(
         managed_roots.append(destination)
     if skills != sorted(skills):
         raise SyncError("public skills must be sorted")
+
+    retired = manifest.get("retired_skills", [])
+    if not isinstance(retired, list) or any(
+        not isinstance(name, str) or not SKILL_NAME.fullmatch(name) for name in retired
+    ):
+        raise SyncError("retired_skills must contain valid Skill names")
+    if len(set(retired)) != len(retired) or set(retired) & set(skills):
+        raise SyncError("retired Skills must be unique and cannot remain active")
+    managed_roots.extend(Path("skills") / name for name in retired)
+
+    index = candidate_root / "skills-index" / "index.md"
+    index.parent.mkdir(parents=True, exist_ok=True)
+    index.write_bytes(public_index(skills))
+    managed_roots.append(Path("skills-index"))
 
     mcp_names: list[str] = []
     for index, entry in enumerate(manifest["mcp_packages"]):

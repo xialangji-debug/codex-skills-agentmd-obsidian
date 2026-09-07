@@ -1,191 +1,43 @@
 ---
 name: asr360x-bug-delivery-orchestrator
-description: Classify concrete ASR3601/ASR3602/360x/Crane/LVGL firmware bug evidence in a read-only intake mode, or coordinate explicit end-to-end bug delivery through deep fetch, diagnosis, narrow fixes, verification, one Chinese commit per bug, fix-pattern memory decisions, Zentao resolution, and an explicitly requested release. Use for reports with repro steps, actual/expected results, screenshots, videos, CATStudio logs, downloaded Zentao details, “有没有这个问题/存不存在/先判断再修”, or composite delivery wording such as “修复提交关禅道出版本” and ordered multi-bug processing. Use zentao-bug-triage directly for pure “抓 bug/当前 bug/禅道有哪些 bug” listing or a bare bug ID that still needs fetching.
+description: Coordinate explicit multistage ASR360x bug delivery or an ordered list of selected Bugs, with one active Bug and reused specialist receipts. Use for 修复提交关禅道出版本 or ordered multi-bug work. Single-Bug lookup/fix belongs to firmware triage; fetching lists or a bare Bug ID belongs to zentao-bug-triage.
 ---
 
-# ASR360x Bug Intake and Delivery Orchestrator
+# ASR360x Bug Delivery Orchestrator
 
-Choose one mode before taking action. Coordinate specialist skills; do not duplicate their implementation.
+Own requested stage order, compact progress, and handoffs. Specialists own diagnosis, implementation, verification, and external actions.
 
-## Mode Selection
+## Choose The Route
 
-| User intent | Mode | State/external writes |
-|---|---|---|
-| Provides concrete evidence; asks whether the bug exists, is already fixed, or needs a change | Read-only intake | Do not initialize delivery state, edit code, commit, change Zentao, or release |
-| Asks for a narrow fix without commit/Zentao/release wording | Intake, then hand off to firmware triage | Edit only after the request clearly authorizes a fix; do not initialize delivery state |
-| Explicitly combines fix with Chinese commit, Zentao resolution, release, or several selected bugs through ordered stages | Delivery | Initialize/resume delivery state and advance only with evidence |
-| Asks to fetch/list current bugs or gives a bare bug ID without local detail | Not this skill | Enter `zentao-bug-triage` |
+| Request | Route |
+| --- | --- |
+| One Bug: existence, explanation, evidence, or fix | asr3601-lvgl-firmware-triage directly; no delivery state |
+| List/fetch Bugs or a bare ID without detail | zentao-bug-triage |
+| Explicit composite delivery or ordered selected Bugs | Coordinate the authorized stages below |
+| Status or resume of an existing delivery | Read its state and continue only incomplete authorized stages |
 
-When intent is ambiguous, start in read-only intake. Do not let a terminal phrase such as “做完” silently authorize commits, Zentao writes, or a release.
+Infer scope from the full request and reuse prior authorization. Generic completion wording does not add commits, Zentao writes, releases, or branch changes.
 
-## Shared Boundaries
+## Delivery Loop
 
-- Treat development-side “关禅道” as mark `已解决`, not QA `关闭`, unless tester authority and closure are explicit.
-- Release only when the user explicitly says `出版本`, `上传`, `fnOS`, or `release`.
-- When the release wording is `快速出版本`, preserve that modifier when handing
-  the release stage to the owner confirmed by the current project index. Use
-  `akq-firmware-release` Quick Release Mode when it is that owner; if no release
-  owner/controller is confirmed, stop and ask rather than borrowing a similar
-  project's script. Quick mode means one owner-controller invocation, no
-  external preflight/post-success checks, and no automatic diagnosis, retry,
-  resume, parameter change, cleanup, or continuation after a failure. Earlier
-  fix/commit/Zentao stages remain authorized only when the user's full request
-  explicitly includes them.
-- Preserve unrelated local changes and record the pre-existing dirty worktree.
-- A successful build does not equal device, platform, or QA verification.
-- Prefer `.codex-project/variant.md` as the canonical variant fingerprint. Refresh it through `asr3601-project-onboard` when missing or stale.
-- Never infer protocol from customer/product wording alone.
+1. Reuse one current project snapshot, build configuration, and release owner. Refresh missing or stale identity only where a stage needs it; a controller owns its checks.
+2. Keep one active Bug. Fetch only that Bug's required detail/attachments, then hand to triage or porting. Reuse already-fetched evidence.
+3. Accept the owner's diagnosis, diff, narrow verification, and memory receipt. Do not repeat those steps through another Skill. Share project identity and build caches across Bugs, never hypotheses, raw evidence, changed-file scope, or verification claims.
+4. Perform requested commits with exact Bug paths and a focused Chinese subject. Check the current diff and staged diff before committing; retain unrelated work. Update the expected HEAD after the workflow's own commit.
+5. Send selected IDs and exact-target fix receipts to zentao-bug-resolver only when resolution is authorized. The resolver owns live product/status/form checks. 已解决 remains QA pending.
+6. Finish the active Bug's requested stages before loading the next Bug. Run one final integrated build if needed, or reuse the requested release controller's build evidence.
+7. Hand release directly to the project-confirmed owner after selected Bugs finish. Formal/FOTA-test pairs use asr3602-fota-pair-release; no earlier standalone full build and no generic delivery_transaction.py probe without an established project profile.
 
-## Specialist Routing
+For 快速出版本, preserve the modifier: one confirmed owner-controller call, no external preflight/post-success checks. If it fails or is ambiguous, report the stage, exact error, known side effects, and needed decision, then wait. Earlier delivery stages retain their own authorization boundaries.
 
-| Stage or evidence | Owner |
-|---|---|
-| Project fingerprint | `asr3601-project-onboard` |
-| Zentao list/detail/history/attachments | `zentao-bug-triage` |
-| CATStudio package or crash/protocol logs | `catstudio-log-extractor` |
-| Current-branch diagnosis and narrow fix | `asr3601-lvgl-firmware-triage` |
-| Cross-branch comparison or port | `asr3601-cross-branch-porting` |
-| Verification, closeout, and validation debt | `asr3601-fix-closeout-reporter` |
-| Canonical fix memory and exact target evidence | `obsidian-fix-pattern-memory` |
-| Explicit Zentao resolution | `zentao-bug-resolver` |
-| Explicit formal release | Matching release skill, normally `akq-firmware-release` |
-| 出 FOTA / 重新出 FOTA / 正式与FOTA测试双包 | `asr3602-fota-pair-release` directly; its two builds provide build evidence and it uploads only the formal package |
+## Persistent State
 
-## Read-Only Intake Mode
+Use [delivery state](references/delivery-state.md) when per-Bug commits are explicitly part of the request and resumable state is needed. The existing stage sequence includes committed; do not fabricate a commit or stage to fit a narrower request.
 
-### Intake Snapshot
+For commitless composite work, keep in-task receipts and perform only requested stages. In an existing ordered delivery, use the documented finish path for a diagnosed already-fixed, no-change, or external outcome; do not invent a commit or fix note. Preserve legacy states and their requested terminal stage; schema version 3 adds these outcomes without satisfying remote resolution from local classification alone.
 
-Collect or infer these fields before edits:
+After an interruption, read status and check evidence for the incomplete stage before retrying an external action. An unexpected checkout/HEAD change invalidates the task snapshot. A wrong-product resolution stops release progression; use the resolver's corrective path only with the applicable authorization.
 
-```text
-来源：截图 / 复现步骤 / CATStudio / Zentao / 用户口述 / 历史问题
-项目路径 / branch / commit / dirty：
-yl_device_ver / CHIP_ID / TARGET_OS / PS_MODE：
-协议 / 客户产品变体 / 构建命令 / 禅道映射：
-用户目标：只判断 / 修复 / 移植 / 抓 bug / 提交 / 禅道 / 发布
-步骤 / 实际 / 期望：
-附件或日志：
-初步模块：
-历史记忆命中：
-第一结论：
-```
+## Result
 
-For Git workspaces, run non-destructive context checks early:
-
-```powershell
-git status --short
-git branch --show-current
-git rev-parse --short HEAD
-```
-
-### Evidence Gates
-
-- Inspect screenshots/videos before code search; record visible page, text, icons, state, and trigger path.
-- Run `catstudio-log-extractor --fast-evidence` first for CATStudio/log packages. Expand only when compact evidence is insufficient.
-- Use already-fetched Zentao detail text locally; re-enter `zentao-bug-triage` only when more history or attachments are required.
-- For similar issues, regressions, cross-branch work, or clear error keywords, search only `Codex/fix-patterns/` with 1-3 terms and read only direct matches.
-- For existence questions, inspect likely code entry points and history before proposing a patch.
-- For protocol ambiguity, identify APP, XCX, YL, AKQ, modem/platform, or backend ownership before firmware edits.
-
-Choose one first-decision label and cite decisive evidence:
-
-```text
-存在，需要修：
-当前 checkout 已修：
-上游/其他分支已修，当前缺失：
-可能已修，但需要设备/日志证明：
-未确认，需要补日志/视频/复现时间：
-平台/后端/硬件/驱动侧，不建议直接改固件：
-需求/产品变体差异，不属于缺陷：
-```
-
-Return before edits:
-
-```text
-第一结论：
-当前分支/提交：
-证据来源：
-历史命中：
-疑似模块：
-下一步：
-需要转入的 skill：
-```
-
-## Delivery Mode
-
-Use the existing state schema and commands unchanged. Existing schema-version-1 state files under `~/.codex/asr360x-delivery/states/` remain valid; do not migrate or recreate them.
-
-1. Initialize state before editing, adding `--release-requested` only when release was explicit:
-
-```powershell
-python "$env:USERPROFILE\.codex\skills\asr360x-bug-delivery-orchestrator\scripts\delivery_state.py" init --repo . --bugs 2935,2931,2868,2867
-```
-
-2. Process bugs in the requested order:
-
-```text
-pending -> deep_fetched -> diagnosed -> fixed -> verified -> committed -> memory_decided -> zentao_resolved
-```
-
-`memory_decided` is retained for schema-version-1 compatibility, but its meaning is
-now “canonical memory recorded”. Every behavior-changing delivered fix must reach
-this stage with a real note, `fix_id`, and target ID. Do not complete it with a
-skip reason.
-
-3. Advance only after the owning skill produced evidence:
-
-```powershell
-python "$env:USERPROFILE\.codex\skills\asr360x-bug-delivery-orchestrator\scripts\delivery_state.py" advance `
-  --repo . --bug 2935 --stage verified --evidence "diff checks + target build passed"
-```
-
-For `committed`, also pass `--commit <short-sha>`. For `memory_decided`, pass:
-
-```powershell
-python "$env:USERPROFILE\.codex\skills\asr360x-bug-delivery-orchestrator\scripts\delivery_state.py" advance `
-  --repo . --bug 2935 --stage memory_decided --evidence "canonical target recorded" `
-  --fix-id FP-YYYYMMDD-XXXXXXXX --memory-note <fix-pattern.md> --target-id <target-id>
-```
-
-4. Before each commit, confirm branch, `HEAD`, and dirty files; stage only the current bug; run both `git diff --check` and `git diff --cached --check`; run targeted verification; use a focused Chinese subject; record the SHA.
-
-5. Before Zentao resolution, require the Bug to have a canonical memory target,
-   then print and verify `bug ID -> detail-page product -> canonical project`.
-   Require exact product equality. Zero exact matches means zero bugs. Never resolve
-   prefix/substring matches from assigned-to-me results.
-
-6. Release only after all selected bugs reach `zentao_resolved` and the state records an explicit release request:
-
-   For an explicit FOTA-pair request, hand off directly to
-   `asr3602-fota-pair-release`. Do not run an earlier standalone full build and
-   do not probe `delivery_transaction.py` unless this exact project has a
-   verified FOTA delivery profile.
-
-```powershell
-python "$env:USERPROFILE\.codex\skills\asr360x-bug-delivery-orchestrator\scripts\delivery_state.py" release `
-  --repo . --status released --evidence "uploaded release folder and verified artifacts"
-```
-
-7. Resume without repeating completed external actions:
-
-```powershell
-python "$env:USERPROFILE\.codex\skills\asr360x-bug-delivery-orchestrator\scripts\delivery_state.py" status --repo .
-```
-
-If a wrong-product resolution occurred, stop release progression, reactivate it through `zentao-bug-resolver --reactivate-resolved`, verify `激活`, and record the correction.
-
-## Final Delivery Report
-
-For a successful request containing `快速出版本`, replace the detailed report
-below with one compact completion message containing the requested bug/commit
-result, released version, and upload destination. Do not run extra checks merely
-to populate that message. If the release controller did not succeed, report only
-the failed stage, exact error, known side effects, and decision needed, then wait.
-
-For ordinary delivery requests, return one row per bug:
-
-```text
-ID | 当前阶段 | 修改 | 验证 | 提交 | 记忆 | 禅道
-```
-
-Then state release status, remaining blockers, and the local state file path.
+Return one compact row per Bug: stage, change, verification, commit state, memory target, and Zentao status. Add release outcome, blockers/device debt, and the state path if one exists. Quick Release success needs only the requested Bug/commit result, released version, and destination; derive these from the controller result.

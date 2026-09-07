@@ -1,4 +1,4 @@
 interface:
   display_name: "Obsidian 修复记忆"
-  short_description: "维护根因记忆、目标证据，并审计 ASR/ESP32 domain"
-  default_prompt: "使用 $obsidian-fix-pattern-memory 查询、更新或审计规范修复记忆，并准确记录 domain 与当前目标证据。"
+  short_description: "快速查询或记录根因记忆与精确目标证据"
+  default_prompt: "使用 $obsidian-fix-pattern-memory 直接查询或更新当前修复的规范记忆；仅在我明确要求时运行维护审计。"

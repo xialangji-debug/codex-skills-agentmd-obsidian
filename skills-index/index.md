@@ -1,16 +1,21 @@
-# Codex Skill Index
+# Public Skill Index
 
-Use this index only when skill routing is unclear, a named skill is not visible in `available skills`, or the user asks to organize skills.
+Generated from public-sync-manifest.json. Use the current task and each
+Skill's description to choose its owner. Project-local routing takes priority.
 
-| Request | Read next |
-|---|---|
-| 360x firmware bug triage, bug existence, cross-branch fixes | `firmware/index.md` |
-| Zentao bug fetching, selected bug details, bug resolving | `zentao/index.md` |
-| Protocol documents, APP/mini-app/vendor/platform questions | `protocol/index.md` |
-| CATStudio logs, crash/log evidence packs | `logs/index.md` |
-| Firmware release, fnOS upload, build/package release | `release/index.md` |
-| Obsidian fix-patterns, memory updates | `memory/index.md` |
-| Archived or disabled skills | `archive/index.md` |
-| Skill registry drift, stale routes, trigger failures | Run active `skill-usage-tracker` command `registry-audit`, then read this index only if routing remains unclear |
+| Task Area | Skill | Instructions |
+| --- | --- | --- |
+| asr3601 cross branch porting | `asr3601-cross-branch-porting` | [SKILL.md](../skills/asr3601-cross-branch-porting/SKILL.md) |
+| asr3601 lvgl firmware triage | `asr3601-lvgl-firmware-triage` | [SKILL.md](../skills/asr3601-lvgl-firmware-triage/SKILL.md) |
+| asr3601 project onboard | `asr3601-project-onboard` | [SKILL.md](../skills/asr3601-project-onboard/SKILL.md) |
+| asr3601 protocol branch matrix | `asr3601-protocol-branch-matrix` | [SKILL.md](../skills/asr3601-protocol-branch-matrix/SKILL.md) |
+| asr3602 local build flash | `asr3602-local-build-flash` | [SKILL.md](../skills/asr3602-local-build-flash/SKILL.md) |
+| asr360x bug delivery orchestrator | `asr360x-bug-delivery-orchestrator` | [SKILL.md](../skills/asr360x-bug-delivery-orchestrator/SKILL.md) |
+| catstudio log extractor | `catstudio-log-extractor` | [SKILL.md](../skills/catstudio-log-extractor/SKILL.md) |
+| obsidian fix pattern memory | `obsidian-fix-pattern-memory` | [SKILL.md](../skills/obsidian-fix-pattern-memory/SKILL.md) |
+| skill usage tracker | `skill-usage-tracker` | [SKILL.md](../skills/skill-usage-tracker/SKILL.md) |
+| zentao bug resolver | `zentao-bug-resolver` | [SKILL.md](../skills/zentao-bug-resolver/SKILL.md) |
+| zentao bug triage | `zentao-bug-triage` | [SKILL.md](../skills/zentao-bug-triage/SKILL.md) |
 
-Keep specialist skills flat under `%USERPROFILE%\.codex\skills`. Primary Codex coordinates multi-step work by invoking the owning global Skill for each operation.
+Release controllers, device supervisors, private configuration, system Skills,
+and plugins are installed separately when required by a project's routing.

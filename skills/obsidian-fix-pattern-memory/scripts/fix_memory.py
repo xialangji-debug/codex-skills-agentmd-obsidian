@@ -201,7 +201,7 @@ def set_frontmatter(text: str, key: str, value: str) -> str:
     yaml = match.group(1)
     pattern = re.compile(rf"^{re.escape(key)}:\s*.*$", re.M)
     replacement = f"{key}: {value}"
-    yaml = pattern.sub(replacement, yaml, count=1) if pattern.search(yaml) else yaml.rstrip() + "\n" + replacement
+    yaml = pattern.sub(lambda _: replacement, yaml, count=1) if pattern.search(yaml) else yaml.rstrip() + "\n" + replacement
     return "---\n" + yaml + "\n---\n" + text[match.end():]
 
 
@@ -373,7 +373,7 @@ def replace_state_block(text: str, state: dict[str, Any]) -> str:
     block = render_state(state)
     pattern = re.compile(rf"{re.escape(STATE_START)}[\s\S]*?{re.escape(STATE_END)}\s*", re.M)
     if pattern.search(text):
-        return pattern.sub(block, text, count=1)
+        return pattern.sub(lambda _: block, text, count=1)
     heading = "\n## 目标应用状态\n\n"
     insert = text.find("\n## 关键词")
     if insert >= 0:
@@ -440,13 +440,12 @@ def set_section(text: str, heading: str, values: list[str]) -> str:
         return text
     body = "\n".join(f"- {value}" for value in clean)
     pattern = re.compile(
-        rf"(^##\s+{re.escape(heading)}\s*$\r?\n)([\s\S]*?)(?=^##\s+|\Z)",
+        rf"(^##[ \t]+{re.escape(heading)}[ \t]*\r?\n)([\s\S]*?)(?=^##[ \t]+|\Z)",
         re.M,
     )
-    replacement = rf"\1\n{body}\n\n"
     if pattern.search(text):
-        return pattern.sub(replacement, text, count=1)
-    return text.rstrip() + f"\n\n## {heading}\n\n{body}\n"
+        return pattern.sub(lambda match: match[1] + "\n" + body + "\n\n", text, count=1)
+    return text.rstrip() + f"\n\n## {heading}\n\n{body}\n\n"
 
 
 def update_knowledge_sections(text: str, args: argparse.Namespace) -> str:
@@ -458,7 +457,7 @@ def update_knowledge_sections(text: str, args: argparse.Namespace) -> str:
         ("关键文件和函数", getattr(args, "key_file", [])),
         ("修复思路", [getattr(args, "fix", "")]),
         ("验证方法", [getattr(args, "verification_method", "")]),
-        ("注意事项", [getattr(args, "caution", "")]),
+        ("注意事项", getattr(args, "caution", [])),
     ]
     for heading, values in fields:
         text = set_section(text, heading, values)

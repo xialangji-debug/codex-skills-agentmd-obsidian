@@ -1,4 +1,0 @@
-interface:
-  display_name: "工程工作流兜底路由"
-  short_description: "仅在项目路由缺失、冲突或跨项目时选择工作流入口"
-  default_prompt: "使用 $aa-skill-router 处理本地项目索引未覆盖的工程请求；已有项目路由时直接服从项目配置。"

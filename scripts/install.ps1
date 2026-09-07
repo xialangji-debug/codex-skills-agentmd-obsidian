@@ -112,7 +112,14 @@ Ensure-ObsidianInstalled
 if (-not $SkipSkills) {
   $skillsDest = Join-Path $CodexHome "skills"
   New-Item -ItemType Directory -Path $skillsDest -Force | Out-Null
-  Copy-DirectoryContents -Source $SkillsSource -Destination $skillsDest -Overwrite
+  $publicManifest = Get-Content -LiteralPath (Join-Path $RepoRoot "public-sync-manifest.json") -Raw | ConvertFrom-Json
+  foreach ($skillName in $publicManifest.skills) {
+    Copy-DirectoryContents -Source (Join-Path $SkillsSource $skillName) -Destination (Join-Path $skillsDest $skillName) -Overwrite
+  }
+  $runtimeSource = Join-Path $RepoRoot "runtime"
+  if (Test-Path -LiteralPath $runtimeSource) {
+    Copy-DirectoryContents -Source $runtimeSource -Destination (Join-Path $CodexHome "scripts") -Overwrite
+  }
   Write-Host "Installed skills to $skillsDest"
   if (Test-Path -LiteralPath $SkillsIndexSource) {
     $skillsIndexDest = Join-Path $CodexHome "skills-index"

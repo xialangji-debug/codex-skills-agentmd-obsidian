@@ -1,47 +1,57 @@
-# Public Snapshot Sync
+# Public Snapshot Publication
 
-公开同步使用显式白名单，不从本机 Skills、插件或 MCP 目录推断“应该发布什么”。白名单位于根目录 `public-sync-manifest.json`；新增或移除公开组件必须先通过人工评审修改该文件。
+`public-sync-manifest.json` owns the public allowlist. The synchronizer copies
+listed global files, Skills, runtime dependencies, and MCP metadata. It generates
+README inventory and `skills-index/index.md` from the same list. `retired_skills`
+permits removal of named obsolete Skill copies without reading their local archives.
+Never infer public eligibility from local installation or copy a private Vault.
 
-## 安全边界
+## Routine Sync
 
-- 只读取清单列出的全局文件、Skill 目录和 MCP 文件。
-- `.system`、插件缓存、虚拟环境、日志、数据库、固件和本机私有文件默认不进入候选树。
-- 同步脚本先在临时目录构建候选树，再使用通用规则和本机私有 denylist 扫描；扫描通过后才允许修改仓库。
-- 本机 denylist 必须放在 `%USERPROFILE%\.codex\secrets\repo-privacy\denylist.txt`，不得提交到仓库。
-- 同步脚本只修改白名单管理的目标和 README 标记区块，不删除未列入清单的仓库目录。
-- 仓库 `origin` 必须与清单中的公开仓库完全一致，否则脚本拒绝运行。
-- 自动化只能推送独立分支并创建 PR，不得直接推送或自动合并 `main`。
+1. Verify the exact origin and a clean dedicated checkout. GitHub commands run
+   directly without changing proxy configuration. Fetch `main`; only fast-forward
+   the local base. Stop for divergence, unknown edits, or authentication failures.
+2. Query open `automation/public-sync-*` PRs before reading local sources. If one
+   exists, report its URL and check status, then stop. Do not create duplicates or
+   append unattended changes to a PR being reviewed.
+3. Run `python -X utf8 scripts/sync_public_snapshot.py` with the external
+   repo-privacy denylist. Zero changes need no branch, commit, or PR.
+4. Create a unique `automation/public-sync-YYYYMMDD-HHmm` branch from current
+   `main` and record its base SHA. Run the same sync command with `--apply`.
+5. Review the generated paths and whitespace. Stage only changed managed paths:
+   `AGENTS.md`, `README.md`, `skills/`, `skills-index/`, `runtime/`, and `mcp/`.
+   Run the staged privacy scan with the external denylist, then
+   `python -X utf8 scripts/run_public_checks.py` and `git diff --cached --check`.
+6. Commit `chore(sync): refresh public Codex snapshot`, push the exact branch,
+   and create a PR to `main`. Verify the remote SHA and checks for that commit.
+   Never push `main`, enable auto-merge, force-push, or publish a release.
 
-## 本地演练
+Install test dependencies with `python -m pip install -r requirements-dev.txt`.
+Install Node.js dependencies with `npm ci --ignore-scripts`; mocked tests do not
+launch or download browsers.
+The check runner installs into a temporary profile and runs tests there, so a
+developer's installed Skills and runtime cannot mask missing package dependencies.
+Windows-only build helper tests run on Windows; portable checks run on both CI OSes.
 
-以下命令只比较，不修改仓库：
+## Authorized Maintenance
 
-```powershell
-python -X utf8 .\scripts\sync_public_snapshot.py
-```
+An interactive request may update manifest, scripts, workflows, and an existing
+PR together. Preserve concurrent changes. Generate the snapshot in an isolated
+clean checkout using the reviewed manifest, verify the exact baseline for every
+destination, and transfer only generated paths to the maintenance checkout.
+This keeps the normal synchronizer's clean-worktree gate intact. Run full checks
+and the staged privacy scan before committing the complete consistent change.
 
-检查仓库是否已经与公开清单一致：
+## Interrupted Publication
 
-```powershell
-python -X utf8 .\scripts\sync_public_snapshot.py --check
-```
-
-在干净工作区中应用候选内容：
-
-```powershell
-python -X utf8 .\scripts\sync_public_snapshot.py --apply
-```
-
-应用后必须检查并显式暂存：
-
-```powershell
-git status --short
-git diff --check
-git diff
-git add AGENTS.md README.md public-sync-manifest.json skills mcp
-python -X utf8 .\scripts\privacy_scan.py --root . --staged `
-  --denylist "$env:USERPROFILE\.codex\secrets\repo-privacy\denylist.txt"
-python -X utf8 .\scripts\run_public_checks.py
-```
-
-只有全部检查通过后，才能提交到 `automation/public-sync-YYYYMMDD-HHmm` 形式的独立分支并创建 PR。检查失败、来源缺失、工作区不干净、远端分叉或没有实际变化时都不发布。
+Retry transient network errors at most twice after 10 and 30 seconds. Before
+retrying push, compare the exact remote branch SHA; before retrying PR creation,
+query the exact head branch. An existing matching remote commit or PR is success.
+Record the base SHA and branch in `.git/public-sync-state.json` before applying.
+After committing, record the commit SHA. Resume only that recorded branch when
+its base-to-HEAD diff contains only managed paths and its routine commit title
+matches. Validate the full snapshot with the external denylist, full checks, and
+the base-to-HEAD whitespace check. An empty staged scan cannot validate a commit.
+Unknown dirty changes, privacy findings, and failed tests require review. Keep
+the failed candidate for diagnosis; do not discard files or repair local sources
+during unattended runs. Never include this private runtime receipt in Git.

@@ -82,7 +82,6 @@ COMMAND_EVIDENCE: dict[str, re.Pattern[str]] = {
 
 CLEANUP_PROTECTED_SKILLS = {
     "asr3601-cross-branch-porting",
-    "asr3601-fix-closeout-reporter",
     "asr3601-lvgl-firmware-triage",
     "asr360x-bug-delivery-orchestrator",
     "browser",
@@ -1768,6 +1767,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     registry_audit.add_argument("--plugin-cache", type=Path, default=CODEX_HOME / "plugins" / "cache")
     registry_audit.add_argument("--available-names-file", type=Path)
+    registry_audit.add_argument("--retired-skills", type=Path)
+    registry_audit.add_argument("--archive-index", type=Path)
     registry_audit.add_argument("--json", action="store_true")
     registry_audit.add_argument("--strict", action="store_true")
     registry_audit.set_defaults(func=cmd_registry_audit)

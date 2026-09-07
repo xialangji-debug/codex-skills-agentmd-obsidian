@@ -154,6 +154,50 @@ class FixMemoryTests(unittest.TestCase):
             note.write_text("# Sample\n", encoding="utf-8")
             self.assertEqual(fix_memory.fix_notes(root), [note])
 
+    def test_literal_paths_survive_new_and_updated_sections(self) -> None:
+        text = fix_memory.note_template("Sample", "FP-TEST")
+        values = [r"C:\BuildRoots\example\固件\ui.c", r"pattern \1 \g<1> \n \t"]
+        for heading in ["关键文件和函数", "Extra evidence"]:
+            with self.subTest(heading=heading):
+                result = fix_memory.set_section(text, heading, values)
+                updated = fix_memory.set_section(result, heading, values)
+                self.assertEqual(result, updated)
+                for value in values:
+                    self.assertIn("- " + value + "\n", updated)
+                self.assertEqual(fix_memory.frontmatter_value(updated, "fix_id"), "FP-TEST")
+
+    def test_repeated_caution_arguments_preserve_literal_text(self) -> None:
+        values = [r"C:\BuildRoots\example\固件\ui.c", r"Literal \1 and \g<1>"]
+        args = fix_memory.build_parser().parse_args([
+            "upsert", "--caution", values[0], "--caution", values[1],
+        ])
+        result = fix_memory.update_knowledge_sections(fix_memory.note_template("Sample", "FP-TEST"), args)
+        for value in values:
+            self.assertIn("- " + value + "\n", result)
+        self.assertNotIn("- ['", result)
+
+    def test_omitted_caution_preserves_existing_section(self) -> None:
+        note = fix_memory.set_section(
+            fix_memory.note_template("Sample", "FP-TEST"), "注意事项", ["Keep existing caution"],
+        )
+        args = fix_memory.build_parser().parse_args(["upsert"])
+        self.assertEqual(fix_memory.update_knowledge_sections(note, args), note)
+
+    def test_literal_frontmatter_and_target_state_round_trip(self) -> None:
+        text = fix_memory.note_template("Sample", "FP-TEST")
+        value = r"C:\BuildRoots\example\1"
+        text = fix_memory.set_frontmatter(text, "source", value)
+        text = fix_memory.set_frontmatter(text, "source", value)
+        self.assertEqual(fix_memory.frontmatter_value(text, "source"), value)
+        state = fix_memory.empty_state("FP-TEST")
+        target = context("target-a", r"branch\1", "static_checked", "2026-09-07T10:00:00+08:00")
+        target["evidence"] = r"C:\BuildRoots\example\report.md"
+        state["targets"] = [target]
+        text = fix_memory.replace_state_block(text, state)
+        text = fix_memory.replace_state_block(text, state)
+        self.assertEqual(fix_memory.decode_state(text)["targets"][0], target)
+        self.assertIn(r"branch\1", text)
+
     def test_domain_template_and_frontmatter_round_trip(self) -> None:
         esp = fix_memory.note_template("ESP32 fix", "FP-ESP", "esp32")
         neutral = fix_memory.note_template("Tool fix", "FP-TOOL", "none")

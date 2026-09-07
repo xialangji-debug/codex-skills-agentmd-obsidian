@@ -7,6 +7,7 @@ import importlib.util
 import json
 import sqlite3
 import tempfile
+from contextlib import ExitStack
 from pathlib import Path
 
 
@@ -22,7 +23,7 @@ def append(path: Path, item: dict) -> None:
         handle.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
-with tempfile.TemporaryDirectory(prefix="skill-usage-incremental-") as temp:
+with tempfile.TemporaryDirectory(prefix="skill-usage-incremental-") as temp, ExitStack() as cleanup:
     root = Path(temp)
     session = root / "session.jsonl"
     db = root / "usage.sqlite"
@@ -31,9 +32,10 @@ with tempfile.TemporaryDirectory(prefix="skill-usage-incremental-") as temp:
     append(session, {"timestamp": "2026-07-16T00:00:02Z", "type": "event_msg", "payload": {"type": "user_message", "message": "$zentao-bug-triage 抓 bug"}})
 
     tracker.SESSION_ROOTS = [root]
-    tracker.discover_skills = lambda: ["zentao-bug-triage"]
-    tracker.discover_skill_md_paths = lambda _skills: []
+    tracker.discover_scannable_skills = lambda: ["zentao-bug-triage"]
+    tracker.discover_active_skill_md_paths = lambda _skills: []
     con = tracker.connect(db)
+    cleanup.callback(con.close)
 
     events, states, resets = tracker.scan_sessions(con)
     assert len(events) == 1
@@ -72,6 +74,5 @@ with tempfile.TemporaryDirectory(prefix="skill-usage-incremental-") as temp:
     tracker.store_scan_state(con, states, [])
     con.commit()
     assert con.execute("select count(*) from usage_events").fetchone()[0] == 1
-    con.close()
 
 print("incremental scan tests passed")

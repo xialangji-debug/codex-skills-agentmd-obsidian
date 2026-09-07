@@ -41,6 +41,15 @@ When the user sends a new or updated protocol file:
 
 If extraction is incomplete, record the gap in `index.md` and continue with the usable evidence.
 
+Keep original Markdown bytes unchanged. For originals without frontmatter,
+register each exact `raw/` path and SHA-256 under `external_sources` in this
+library's `index.md`; never refresh a mismatched hash without investigating.
+The architecture audit validates registered originals and their local links.
+Give extracted Markdown the required Vault frontmatter: `area: engineering`,
+`domains: [asr]`, `scope: [topic/protocol]`, `kind: source-extract`,
+`codex_access: read`, `trust: derived`, `lifecycle: active`, and a relative
+`source` path to its original. Preserve extraction gaps and evidence limits.
+
 ## Protocol Question Workflow
 
 For “是否符合协议/哪边问题/当前分支是否支持”:
@@ -58,15 +67,12 @@ For “是否符合协议/哪边问题/当前分支是否支持”:
    - enum value
    - platform name
    - code filename/function if provided
-3. Inspect the current project branch when code comparison is needed:
-
-```powershell
-git status --short
-git branch --show-current
-git rev-parse --short HEAD
-```
-
-   Read `.codex-project/variant.md` first when present. Confirm repo, branch, commit, `yl_device_ver`, chip, OS, protocol, customer/product variant, build parameters, and Zentao mapping. If the fingerprint disagrees with current Git or `yl.h`, refresh it with `asr3601-project-onboard` and do not reuse the stale protocol conclusion.
+3. For code comparison, reuse the current task snapshot or inspect the relevant
+   live branch/version and parser/formatter. Read only the identity fields that
+   determine protocol applicability. A generated protocol label is a search hint;
+   confirm active support in source/configuration and the applicable document.
+   Refresh stale facts needed by the comparison, not the full build/device/Zentao
+   context for every field question.
 
 4. Search firmware code by stable clues from the protocol, not by broad guesses:
    - APP/XCX/YL/AKQ keywords

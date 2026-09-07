@@ -4,6 +4,7 @@ const assert = require("assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const cp = require("child_process");
 
 const resolver = require("./zentao_bug_resolver");
 
@@ -21,6 +22,10 @@ assert.strictEqual(reactivate.activateComment, "误将非当前项目Bug标记�
 assert.throws(
   () => resolver.parseArgs(["node", "resolver", "--ids", "3310", "--reactivate-resolved", "--activate-closed"]),
   /cannot be combined/,
+);
+assert.throws(
+  () => resolver.parseArgs(["node", "resolver", "--ids", "3310", "--allow-product-mismatch"]),
+  /requires --reactivate-resolved/,
 );
 
 assert.strictEqual(
@@ -81,8 +86,138 @@ comment:
   const jsonPath = path.join(tempDir, "plan.json");
   fs.writeFileSync(jsonPath, JSON.stringify({ bugs: [{ id: 2936, comment: "JSON 备注" }] }), "utf8");
   assert.strictEqual(resolver.parseJsonPlan(jsonPath)[0].comment, "JSON 备注");
+
+  const ctx = { repo: tempDir, branch: "sample-main" };
+  assert.throws(() => resolver.resolveExpectedProduct(defaults, ctx), /Missing confirmed Zentao product/);
+  const blockedOutput = path.join(tempDir, "blocked-output");
+  const blocked = cp.spawnSync(process.execPath, [
+    path.join(__dirname, "zentao_bug_resolver.js"), "--repo", tempDir,
+    "--ids", "1001", "--submit", "--output", blockedOutput,
+  ], { encoding: "utf8" });
+  assert.strictEqual(blocked.status, 1);
+  assert.match(blocked.stderr, /Missing confirmed Zentao product/);
+  assert.strictEqual(fs.existsSync(blockedOutput), false);
+
+  const projectDir = path.join(tempDir, ".codex-project");
+  fs.mkdirSync(projectDir);
+  const legacyPath = path.join(projectDir, "zentao.md");
+  fs.writeFileSync(legacyPath, "禅道项目名：`Legacy Product`\n", "utf8");
+  assert.strictEqual(resolver.expectedProductFromRepo(tempDir), "Legacy Product");
+  fs.writeFileSync(legacyPath, "禅道项目名：`First`\nZentao项目：`Second`\n", "utf8");
+  assert.throws(() => resolver.expectedProductFromRepo(tempDir), /Ambiguous legacy/);
+
+  const variantPath = path.join(projectDir, "variant.md");
+  const confirmed = "- 映射状态：`confirmed`\n- 禅道产品：`Example MiniApp Asset Edition`\n- branch：`sample-main`\n";
+  fs.writeFileSync(variantPath, confirmed, "utf8");
+  assert.strictEqual(resolver.expectedProductFromRepo(tempDir), "Example MiniApp Asset Edition");
+  assert.strictEqual(resolver.resolveExpectedProduct(defaults, ctx), "Example MiniApp Asset Edition");
+  assert.throws(
+    () => resolver.resolveExpectedProduct({ ...defaults, expectedProduct: "Example MiniApp" }, ctx),
+    /differs from the confirmed/,
+  );
+  assert.throws(
+    () => resolver.resolveExpectedProduct(defaults, { ...ctx, branch: "another-branch" }),
+    /different branch/,
+  );
+  fs.writeFileSync(variantPath, confirmed + "- 禅道产品：`Other Product`\n", "utf8");
+  assert.throws(() => resolver.expectedProductFromRepo(tempDir), /Ambiguous variant field/);
+  for (const invalid of [
+    "- 映射状态：`needs-confirmation`\n- 禅道产品：`Example`\n",
+    "- 映射状态：`confirmed`\n- 禅道产品：`未确认`\n",
+    "- 映射状态：\n- 禅道产品：`Example`\n",
+    "- 映射状态：`confirmed`\n",
+  ]) {
+    fs.writeFileSync(variantPath, invalid, "utf8");
+    assert.throws(() => resolver.expectedProductFromRepo(tempDir), /not confirmed|Missing confirmed/);
+  }
+  assert.doesNotThrow(() => resolver.resolveExpectedProduct({
+    ...defaults, reactivateResolved: true, allowProductMismatch: true,
+  }, ctx));
 } finally {
   fs.rmSync(tempDir, { recursive: true, force: true });
 }
 
-console.log("zentao_bug_resolver tests passed");
+async function verifyMissingProductHasNoPageAccess() {
+  let pageAccesses = 0;
+  const page = new Proxy({}, { get() { pageAccesses++; throw new Error("Unexpected page access"); } });
+  await assert.rejects(
+    resolver.processBug(page, { ...defaults, submit: true }, { id: "1001" }),
+    /Missing confirmed Zentao product/,
+  );
+  assert.strictEqual(pageAccesses, 0);
+}
+
+function mockBugPage(product, initialStatus = "激活") {
+  const trace = { navigations: [], saves: 0 };
+  const values = { resolution: "", resolvedBuild: "trunk", assignedTo: "original-user" };
+  const locator = {
+    first() { return this; },
+    async count() { return 1; },
+    async click() { trace.saves++; },
+  };
+  const frame = {
+    locator() { return locator; },
+    async evaluate(callback, argument) {
+      if (typeof argument === "string") {
+        return { product, status: trace.saves ? "已解决" : initialStatus, title: "Synthetic bug" };
+      }
+      if (argument && argument.name) {
+        values[argument.name] = argument.value;
+        return argument.value;
+      }
+      if (String(callback).includes("parsePicker")) {
+        return {
+          title: "Synthetic bug",
+          resolutionOptions: [{ value: "fixed", text: "已解决" }],
+          buildOptions: [{ value: "trunk", text: "主干" }],
+          assignOptions: [{ value: "original-user", text: "Original" }],
+          values: { ...values },
+        };
+      }
+      if (String(callback).includes("new FormData")) return Object.entries(values);
+      throw new Error("Unexpected mock evaluation");
+    },
+  };
+  return {
+    trace,
+    async goto(url) { trace.navigations.push(url); },
+    async waitForTimeout() {},
+    async waitForLoadState() {},
+    frames() { return [frame]; },
+  };
+}
+
+async function verifyRemoteWriteBoundaries() {
+  const args = { ...defaults, expectedProduct: "Product A", siteUrl: "https://offline.example.invalid" };
+  const item = { id: "1001", title: "Synthetic bug", resolution: "fixed", resolvedBuild: "trunk", assignTo: "", comment: "" };
+  const mismatch = mockBugPage("Product B");
+  await assert.rejects(resolver.processBug(mismatch, { ...args, submit: true }, item), /product mismatch/);
+  assert.strictEqual(mismatch.trace.saves, 0);
+  assert.deepStrictEqual(mismatch.trace.navigations, ["https://offline.example.invalid/bug-view-1001.html"]);
+
+  const preview = mockBugPage("Product A");
+  const previewResult = await resolver.processBug(preview, args, item);
+  assert.strictEqual(previewResult.submitted, false);
+  assert.strictEqual(preview.trace.saves, 0);
+  assert.strictEqual(previewResult.assignee.value, "original-user");
+
+  const submit = mockBugPage("Product A");
+  const submitResult = await resolver.processBug(submit, { ...args, submit: true }, item);
+  assert.strictEqual(submitResult.submitted, true);
+  assert.strictEqual(submit.trace.saves, 1);
+  assert.strictEqual(submitResult.finalStatus, "已解决");
+
+  const correction = mockBugPage("Product B", "已解决");
+  const correctionResult = await resolver.processBug(correction, {
+    ...args, allowProductMismatch: true, reactivateResolved: true,
+  }, item);
+  assert.strictEqual(correctionResult.activationPlanned, true);
+  assert.strictEqual(correction.trace.saves, 0);
+}
+
+verifyMissingProductHasNoPageAccess().then(verifyRemoteWriteBoundaries).then(() => {
+  console.log("zentao_bug_resolver tests passed");
+}).catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

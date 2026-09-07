@@ -1,4 +1,4 @@
 interface:
   display_name: "ASR3602 Local Build Flash"
-  short_description: "本地编译并刷入普通固件，按需完成会话绑定的自动日志采集"
-  default_prompt: "Use $asr3602-local-build-flash to build and flash the exact ASR artifact, then capture current-session CATStudio evidence when requested."
+  short_description: "按请求只编译、只刷机或执行一次编译刷机抓日志链路"
+  default_prompt: "使用 $asr3602-local-build-flash 选择最窄模式处理普通固件；只在我明确要求时加载刷机或 CATStudio 流程。"

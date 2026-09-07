@@ -1,166 +1,91 @@
 ---
 name: obsidian-fix-pattern-memory
-description: Search, create, merge, update, and domain-audit canonical local Obsidian fix-pattern memory with per-project/branch/version target records and independent implementation, verification, and Zentao states. Use for 读取记忆库, 根据记忆, 记一下, every completed behavior-changing fix, 收工更新, similar issues, regressions, cross-branch reuse, ASR/ESP32 domain correction, device/platform/QA verification, automatic Zentao snapshot transitions, or reactivated bugs that must downgrade one exact target without erasing other verified targets.
+description: Search or maintain canonical Obsidian fix-patterns and exact-target evidence, or report validation debt and Campaigns. Use for 读取记忆库, 根据记忆, 记一下, behavior-changing fixes, regression lookup, evidence/status updates, 待真机, 验证债务, 待回归, Campaign, or 发布前验收清单. Routine recording uses one direct path; reporting and maintenance are explicit modes.
 ---
 
-# Obsidian Fix Pattern Memory
+# Obsidian Fix-Pattern Memory
 
-Use local Markdown directly. Never use Basic Memory MCP.
+Canonical notes live under:
 
 ```text
 %USERPROFILE%\Documents\Obsidian\CodexVault\Codex\fix-patterns
 ```
 
-This skill is the only writer of canonical fix-pattern state. Other skills submit
-target evidence or status events through `scripts/fix_memory.py`; they must not
-invent separate note schemas.
+Use `scripts/fix_memory.py` as the only canonical-note writer. Never use Basic Memory MCP or
+invent a second state schema.
 
-## Lookup
+## Fast Record Path
 
-1. Identify module, symptom/log words, files/functions, project family, branch,
-   and version.
-2. Search only `fix-patterns/` with one to three precise terms.
-3. Read up to three genuine matches. Do not pad with unrelated notes or scan the
-   whole vault.
-4. Treat memory match confidence and repair eligibility as independent decisions.
-5. A high-confidence match requires compatible symptoms/root cause or code symbols;
-   project, branch, customer, or device text alone is insufficient.
+After a behavior-changing fix, consume the current Bug receipt:
 
-“读取记忆/根据记忆” alone is read-only. If the same request then produces an
-actual behavior fix, record that completed fix under the normal write policy.
-
-## Automatic Write Boundary
-
-Record every completed behavior-changing code, configuration, or resource fix,
-including a Fast Fix. Static or build evidence creates a `working` target; it does
-not claim device/platform/QA verification.
-
-Do not auto-record:
-
-- explanation or investigation without a fix;
-- comments, formatting, generated churn, or pure documentation wording;
-- reverted experiments or temporary diagnostics;
-- software installation, cleanup, or local environment repair unrelated to product behavior;
-- anything the user explicitly says not to record.
-
-For a high-confidence same root cause, update the existing canonical note. For a
-medium ambiguous match, keep a separate working note or ask before merging. Never
-silently merge two different root causes.
-
-## Canonical Model
-
-Keep one full note per root cause:
-
-- `fix_id`: stable root-cause identity.
-- reusable symptoms, signatures, root cause, files/functions, fix, verification,
-  and cautions.
-- `reference_target`: strongest and newest eligible implementation.
-- one concise target row per exact repo/branch/version/variant.
-- Bug IDs and latest evidence on the matching target row.
-
-The script stores only one-way `repo_id` and `variant_id` hashes in managed state;
-it never stores an absolute repository path or username. See
-`references/fix-record-schema.md` for fields and transitions.
-
-Reference order:
-
-```text
-qa_verified > platform_verified > device_verified > build_passed
-> static_checked > unverified
-```
-
-A newer weak target does not replace an older stronger reference. Reactivation of
-the reference downgrades only that exact target and selects the next eligible one.
-
-## Record A Fix
-
-For a new root cause, provide actual knowledge fields and write the target state:
+1. If the receipt already records this fix and verification in an exact canonical
+   target, reuse it without another write. For new evidence, call `upsert --note`
+   or the matching `event` once on that note. Do not search again.
+2. If `memory_target` is empty, search `fix-patterns/` once with one to three
+   root-cause, symbol, or symptom terms.
+3. Update one high-confidence root-cause match. If none exists, create one note.
+   Keep ambiguous roots separate instead of merging by project/customer name.
+4. Stop after the write. Do not run full `validate`, migration, domain audit, or
+   cross-project candidates during routine recording.
 
 ```powershell
-python -X utf8 "$env:USERPROFILE\.codex\skills\obsidian-fix-pattern-memory\scripts\fix_memory.py" upsert `
-  --repo . --title "UI state is not refreshed after an event" `
-  --slug "ui-state-refresh-after-event" --bug 1001 `
-  --keyword "refresh" --keyword "event" --scope "ASR firmware" `
-  --symptoms "The page keeps the previous state after the event." `
-  --root-cause "The state write path did not emit the existing refresh notification." `
-  --key-file "gui/example.c:refresh_view" `
-  --fix "Emit the existing notification after the state update." `
-  --verification-method "diff check and target build; device regression still pending" `
-  --verification build_passed --implementation applied --write
+python -X utf8 "$env:USERPROFILE\.codex\skills\obsidian-fix-pattern-memory\scripts\fix_memory.py" upsert --note <canonical.md> --repo . --bug <id> --implementation applied --verification <level> --write
 ```
 
-New written notes require `--symptoms`, `--root-cause`, and `--fix`. For an exact
-existing match, pass `--note <path>` and only the fields that genuinely changed.
-For a new note, `--domain asr|esp32|none` is explicit authority. Without it, the
-script requires one unambiguous project-key or repository-path match in
-`%USERPROFILE%\.codex\active-projects.json`; it never silently defaults to ASR.
+For a new root cause, include title, slug, keywords, scope, symptoms, root cause,
+key files/functions, fix, verification method, and explicit
+`--domain asr|esp32|none`. The script requires the knowledge fields before it
+writes a new note.
 
-## Record Evidence Events
+## Lookup Path
 
-Use one exact note and current target context:
+For explicit memory lookup, regression, similar issue, or cross-branch work,
+search only `fix-patterns/` with one to three precise terms and read at most three
+genuine matches. A high-confidence match needs compatible symptoms/root cause or
+code symbols; project, branch, device, or customer text alone is insufficient.
+
+`读取记忆` or `根据记忆` authorizes lookup only. A later behavior fix follows the
+Fast Record Path.
+
+## Evidence Event Path
+
+Update only the exact target row:
 
 ```powershell
-python -X utf8 "$env:USERPROFILE\.codex\skills\obsidian-fix-pattern-memory\scripts\fix_memory.py" event `
-  --note <fix-pattern.md> --repo . --bug 1001 --event device_verified `
-  --evidence "target device regression passed" --write
+python -X utf8 "$env:USERPROFILE\.codex\skills\obsidian-fix-pattern-memory\scripts\fix_memory.py" event --note <canonical.md> --repo . --bug <id> --event <event> --evidence "<evidence>" --write
 ```
 
-Events:
+Build/static evidence never becomes device/platform/QA verification. `resolved`
+means development-resolved and QA-pending; only `closed` or equivalent explicit
+QA evidence supports `qa_verified`. Reactivation downgrades only the exact target
+with the materially same symptom.
 
-```text
-fixed, build_passed, committed, device_verified, platform_verified,
-zentao_resolved, zentao_closed, reactivated_same, reactivated_variant,
-not_applicable, superseded
-```
+## Validation Debt Reports
 
-`zentao_resolved` means QA pending. `zentao_closed` upgrades the exact target to
-`qa_verified`. `reactivated_same` marks it `failed + needs_review`.
-`reactivated_variant` never changes the old target automatically.
-
-## Cross-Project Candidates
-
-For “其他版本要不要一起改”, list only explicitly active projects:
+For pending device/platform/QA checks or Campaigns, run the read-only report:
 
 ```powershell
-python -X utf8 "$env:USERPROFILE\.codex\skills\obsidian-fix-pattern-memory\scripts\fix_memory.py" candidates `
-  --note <fix-pattern.md>
+python -X utf8 "$env:USERPROFILE\.codex\skills\obsidian-fix-pattern-memory\scripts\validation_debt_report.py" --fix-patterns "$env:USERPROFILE\Documents\Obsidian\CodexVault\Codex\fix-patterns" [filters]
 ```
 
-The command omits absolute paths and returns unassessed targets only. It does not
-claim the root cause exists there and never switches or edits a project.
+Use project/branch/version/domain filters and `--campaign` for the requested
+scope. Read [validation debt](references/validation-debt.md) for grouping,
+readiness meanings, or open-loop reconciliation. Write a draft/delta only to an
+explicitly requested standalone path; do not rewrite canonical open-loops.
+Reporting does not trigger ordinary fix recording or upgrade evidence.
 
-## Migration And Validation
+## Write Boundary
 
-Preview legacy notes first:
-
-```powershell
-python -X utf8 "$env:USERPROFILE\.codex\skills\obsidian-fix-pattern-memory\scripts\fix_memory.py" migrate
-python -X utf8 "$env:USERPROFILE\.codex\skills\obsidian-fix-pattern-memory\scripts\fix_memory.py" validate
-```
-
-Use `migrate --write` only after reviewing the candidate list. Migration adds IDs
-and an empty target matrix; it does not guess historical branches or verification.
-
-Audit domain classification before any historical correction:
-
-```powershell
-python -X utf8 "$env:USERPROFILE\.codex\skills\obsidian-fix-pattern-memory\scripts\fix_memory.py" audit-domains --only-domain esp32
-```
-
-Only after reviewing the exact mismatch list may `--write` be added. Managed
-target project keys are the strongest signal; an explicit ESP32 filename/title is
-also eligible. Ambiguous or neutral notes remain unchanged. `validate` reports
-domain counts, advisory high-confidence mismatches, and hard schema errors.
-
-`new_fix_pattern.py` and `memory_trust.py` remain legacy compatibility tools. Use
-`fix_memory.py` for all new workflows.
-
-## Privacy And Reporting
-
-Keep live notes, snapshots, Bug data, project mappings, branches, customer names,
-and service details local. Reusable repositories may contain only generic scripts,
-schema documentation, and synthetic tests.
+Record completed behavior-changing code, configuration, or resource fixes. Do
+not auto-record explanation-only work, comments/formatting, reverted experiments,
+temporary diagnostics, unrelated environment cleanup, or anything the user says
+not to record. Never save credentials, full chats, large logs, or private account
+data.
 
 After a write, report the note path, `fix_id`, exact target state, evidence level,
-and whether other targets are only candidates. If no write occurred, state the
-specific exclusion reason.
+and whether any other targets remain candidates.
+
+Read [fix record schema](references/fix-record-schema.md) only when interpreting
+identity/state transitions. Read [maintenance operations](references/maintenance.md)
+only for migration, validation, domain correction, or cross-project candidate
+audits.
