@@ -1,0 +1,9 @@
+{
+  "name": "codex-public-workflow-checks",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Dependencies for the public workflow's offline checks",
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

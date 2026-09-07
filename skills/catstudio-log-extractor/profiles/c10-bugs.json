@@ -1,0 +1,23 @@
+{
+  "3996": {
+    "title": "SIM PIN changes across devices",
+    "keywords": ["pin", "pin_auto", "IMEI", "sim pin", "PIN_OPER", "watch_modem_enter_sim_pin", "watch_modem_change_sim_pin"],
+    "evidence": "video",
+    "hint": "Video-only evidence in the known snapshot; extract frames or inspect the described PIN behavior."
+  },
+  "4003": {
+    "title": "Binding wizard and SIM lock after reboot",
+    "keywords": ["simlock", "iccid", "BINDSTA", "POWERUP", "device_bind", "check_simlock", "readnnvm", "PIN_OPER"],
+    "evidence": "log"
+  },
+  "4045": {
+    "title": "Ringing in silent mode",
+    "keywords": ["scene", "SILENT", "PROFILES", "ring", "RINGLEVEL", "TTSLEVEL", "PHONELEVEL", "setting_volume", "scene_mode"],
+    "evidence": "log"
+  },
+  "4046": {
+    "title": "Automatic location reports base station only",
+    "keywords": ["wifi", "WIFI", "scan", "WIFIMAC", "XCX_UD", "XCX_V2", "location", "LBS", "GPS", "gps_loss", "yl_upload_location"],
+    "evidence": "log"
+  }
+}

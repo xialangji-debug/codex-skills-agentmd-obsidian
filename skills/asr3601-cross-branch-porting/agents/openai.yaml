@@ -1,4 +1,4 @@
 interface:
   display_name: "ASR3601 Cross-Branch Porting"
-  short_description: "移植修复或按顺序集成提交并在冲突处停止"
-  default_prompt: "Use $asr3601-cross-branch-porting to port a firmware fix or integrate an ordered commit list with backup, conflict-stop, target verification, and reusable memory."
+  short_description: "移植修复或按顺序集成提交，完成一次目标验证并在冲突处停止"
+  default_prompt: "使用 $asr3601-cross-branch-porting 移植修复或按顺序集成提交；复用任务快照，执行一次目标验证，不追加默认 closeout。"

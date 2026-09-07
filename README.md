@@ -126,7 +126,7 @@ Codex 原生扩展点：
 <summary>当前公开 Skills</summary>
 
 <!-- BEGIN PUBLIC SKILLS -->
-`aa-skill-router`, `asr3601-cross-branch-porting`, `asr3601-fix-closeout-reporter`, `asr3601-lvgl-firmware-triage`, `asr3601-project-onboard`, `asr3601-protocol-branch-matrix`, `asr3602-local-build-flash`, `asr360x-bug-delivery-orchestrator`, `catstudio-log-extractor`, `codex-ccswitch-mobile`, `codex-clash-proxy`, `obsidian-fix-pattern-memory`, `skill-usage-tracker`, `zentao-bug-resolver`, `zentao-bug-triage`。
+`asr3601-cross-branch-porting`, `asr3601-lvgl-firmware-triage`, `asr3601-project-onboard`, `asr3601-protocol-branch-matrix`, `asr3602-local-build-flash`, `asr360x-bug-delivery-orchestrator`, `catstudio-log-extractor`, `obsidian-fix-pattern-memory`, `skill-usage-tracker`, `zentao-bug-resolver`, `zentao-bug-triage`。
 <!-- END PUBLIC SKILLS -->
 
 </details>

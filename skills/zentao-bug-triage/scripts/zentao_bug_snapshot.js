@@ -171,10 +171,9 @@ Defaults:
   --expect-repo-name and --expect-branch are preflight guards. When provided, any
   mismatch aborts before opening Zentao, which prevents fetching bugs from the
   wrong worktree or branch.
-  By default every fetched list row opens its detail page and downloads all
-  attachments. Detail pages are fetched with four parallel workers. Use
-  --detail-limit 0 or --no-download-attachments only for an explicitly requested
-  fast list.
+  Direct invocation deep-fetches list rows by default. The Python fast launcher
+  passes --detail-limit 0 and --no-download-attachments for its lightweight list
+  mode; use selected IDs or --deep-all when detail evidence is actually needed.
   Each snapshot writes triage.md, work-items.md, and ignored-items.md unless
   --no-work-md is passed. work-items.md contains bugs Codex should inspect/fix.
   ignored-items.md contains platform/low-level/log-needed/unclear issues to skip.
@@ -1301,7 +1300,8 @@ function slug(s) {
 
 function bugDisplayLabel(bug) {
   const id = `${bug?.id ?? ""}`.trim().replace(/^#+\s*/, "").replace(/\|/g, "/") || "ID未获取";
-  const title = oneLine(bug?.title || "标题未获取").replace(/\|/g, "/");
+  const rawTitle = `${bug?.title ?? ""}`.trim();
+  const title = oneLine(rawTitle || "标题未获取").replace(/\|/g, "/");
   return `${id} ${title}`;
 }
 

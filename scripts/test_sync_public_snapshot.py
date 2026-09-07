@@ -226,6 +226,36 @@ class PublicSnapshotSyncTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn("origin does not match", result.stdout)
 
+    def test_retirement_removes_only_named_skill_and_refreshes_index(self) -> None:
+        content = json.loads(self.manifest.read_text(encoding="utf-8"))
+        content["retired_skills"] = ["retired-skill"]
+        self.manifest.write_text(json.dumps(content), encoding="utf-8")
+        retired = self.repo / "skills/retired-skill/SKILL.md"
+        retired.parent.mkdir(parents=True)
+        retired.write_text("retired", encoding="utf-8")
+        index = self.repo / "skills-index/old/index.md"
+        index.parent.mkdir(parents=True)
+        index.write_text("old route", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.repo), "add", "--", "public-sync-manifest.json", "skills/retired-skill", "skills-index"], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "commit", "-qm", "review retirement"], check=True)
+        result = self.run_sync("--apply", denylist=self.denylist)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(retired.exists())
+        self.assertFalse(index.exists())
+        self.assertTrue((self.repo / "skills/private-skill/keep.txt").exists())
+        generated = (self.repo / "skills-index/index.md").read_text(encoding="utf-8")
+        self.assertIn("../skills/public-skill/SKILL.md", generated)
+        self.assertNotIn("retired-skill", generated)
+        self.assertEqual(0, self.run_sync("--check", denylist=self.denylist).returncode)
+
+    def test_retirement_cannot_remove_an_active_skill(self) -> None:
+        content = json.loads(self.manifest.read_text(encoding="utf-8"))
+        content["retired_skills"] = ["public-skill"]
+        self.manifest.write_text(json.dumps(content), encoding="utf-8")
+        result = self.run_sync(denylist=self.denylist)
+        self.assertEqual(2, result.returncode)
+        self.assertIn("cannot remain active", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

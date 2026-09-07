@@ -7,6 +7,7 @@ import importlib.util
 import json
 import sqlite3
 import tempfile
+from contextlib import ExitStack
 from pathlib import Path
 
 
@@ -22,7 +23,7 @@ def append(path: Path, item: dict) -> None:
         handle.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
-with tempfile.TemporaryDirectory(prefix="skill-usage-incremental-") as temp:
+with tempfile.TemporaryDirectory(prefix="skill-usage-incremental-") as temp, ExitStack() as cleanup:
     root = Path(temp)
     session = root / "session.jsonl"
     db = root / "usage.sqlite"
@@ -34,45 +35,44 @@ with tempfile.TemporaryDirectory(prefix="skill-usage-incremental-") as temp:
     tracker.discover_scannable_skills = lambda: ["zentao-bug-triage"]
     tracker.discover_active_skill_md_paths = lambda _skills: []
     con = tracker.connect(db)
-    try:
-        events, states, resets = tracker.scan_sessions(con)
-        assert len(events) == 1
-        assert events[0]["skill"] == "zentao-bug-triage"
-        tracker.store_events(con, events, commit=False)
-        tracker.store_scan_state(con, states, resets)
-        con.commit()
+    cleanup.callback(con.close)
 
-        events, states, resets = tracker.scan_sessions(con)
-        assert events == []
-        assert states == []
-        assert resets == []
+    events, states, resets = tracker.scan_sessions(con)
+    assert len(events) == 1
+    assert events[0]["skill"] == "zentao-bug-triage"
+    tracker.store_events(con, events, commit=False)
+    tracker.store_scan_state(con, states, resets)
+    con.commit()
 
-        append(session, {"timestamp": "2026-07-16T00:00:03Z", "type": "event_msg", "payload": {"type": "task_started", "turn_id": "t2"}})
-        append(session, {"timestamp": "2026-07-16T00:00:04Z", "type": "event_msg", "payload": {"type": "user_message", "message": "使用 $zentao-bug-triage"}})
-        events, states, resets = tracker.scan_sessions(con)
-        assert len(events) == 1
-        assert events[0]["turn_id"] == "t2"
-        tracker.store_events(con, events, commit=False)
-        tracker.store_scan_state(con, states, resets)
-        con.commit()
+    events, states, resets = tracker.scan_sessions(con)
+    assert events == []
+    assert states == []
+    assert resets == []
 
-        assert con.execute("select count(*) from usage_events").fetchone()[0] == 2
-        state = con.execute("select byte_offset, file_size from session_scan_state").fetchone()
-        assert state[0] == state[1] == session.stat().st_size
+    append(session, {"timestamp": "2026-07-16T00:00:03Z", "type": "event_msg", "payload": {"type": "task_started", "turn_id": "t2"}})
+    append(session, {"timestamp": "2026-07-16T00:00:04Z", "type": "event_msg", "payload": {"type": "user_message", "message": "使用 $zentao-bug-triage"}})
+    events, states, resets = tracker.scan_sessions(con)
+    assert len(events) == 1
+    assert events[0]["turn_id"] == "t2"
+    tracker.store_events(con, events, commit=False)
+    tracker.store_scan_state(con, states, resets)
+    con.commit()
 
-        session.write_text("", encoding="utf-8")
-        append(session, {"timestamp": "2026-07-16T00:00:05Z", "type": "session_meta", "payload": {"id": "s2"}})
-        append(session, {"timestamp": "2026-07-16T00:00:06Z", "type": "event_msg", "payload": {"type": "task_started", "turn_id": "t3"}})
-        append(session, {"timestamp": "2026-07-16T00:00:07Z", "type": "event_msg", "payload": {"type": "user_message", "message": "$zentao-bug-triage refreshed"}})
-        events, states, resets = tracker.scan_sessions(con)
-        assert len(events) == 1 and resets == [str(session)]
-        for source_file in resets:
-            con.execute("delete from usage_events where source_file = ?", (source_file,))
-        tracker.store_events(con, events, commit=False)
-        tracker.store_scan_state(con, states, [])
-        con.commit()
-        assert con.execute("select count(*) from usage_events").fetchone()[0] == 1
-    finally:
-        con.close()
+    assert con.execute("select count(*) from usage_events").fetchone()[0] == 2
+    state = con.execute("select byte_offset, file_size from session_scan_state").fetchone()
+    assert state[0] == state[1] == session.stat().st_size
+
+    session.write_text("", encoding="utf-8")
+    append(session, {"timestamp": "2026-07-16T00:00:05Z", "type": "session_meta", "payload": {"id": "s2"}})
+    append(session, {"timestamp": "2026-07-16T00:00:06Z", "type": "event_msg", "payload": {"type": "task_started", "turn_id": "t3"}})
+    append(session, {"timestamp": "2026-07-16T00:00:07Z", "type": "event_msg", "payload": {"type": "user_message", "message": "$zentao-bug-triage refreshed"}})
+    events, states, resets = tracker.scan_sessions(con)
+    assert len(events) == 1 and resets == [str(session)]
+    for source_file in resets:
+        con.execute("delete from usage_events where source_file = ?", (source_file,))
+    tracker.store_events(con, events, commit=False)
+    tracker.store_scan_state(con, states, [])
+    con.commit()
+    assert con.execute("select count(*) from usage_events").fetchone()[0] == 1
 
 print("incremental scan tests passed")

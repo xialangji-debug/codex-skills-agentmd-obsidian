@@ -98,7 +98,7 @@ function bug(overrides = {}) {
     steps: "进入云相册，上传图片并断网",
     expected: "上传失败后应该恢复按钮并提示失败",
     actual: "按钮一直处于上传中",
-    product: "Example Device",
+    product: "TW18 LT52",
     status: "激活",
     category: "UI Bug",
     canHandle: "可以先查",

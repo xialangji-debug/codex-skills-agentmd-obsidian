@@ -1,77 +1,70 @@
 ---
 name: asr3602-local-build-flash
-description: Build and optionally flash a normal local ASR3602/360x firmware package without doing a release upload or dump-watchdog modification. Use when the user says "出固件", "编译固件", "编译一个包", "刷固件", "刷到串口机器", "本地编译刷机", or asks to compile a current 360x project and flash a generated zip whose filename contains neither source nor dump.
+description: Build a normal local ASR360x firmware package, flash an existing verified package, or perform one build/flash/current-session CATStudio capture chain. Use for 出固件, 编译固件, 编译一个包, 刷固件, 刷到串口机器, 本地编译刷机, or 编译刷机抓日志. Do not use for releases, FOTA, uploads, or DumpTest.
 ---
 
-# ASR3602 Local Build Flash
+# ASR360x Local Build And Flash
 
-## Overview
+Select one mode and load only its required context.
 
-Use this skill for a local build/flash loop only. It compiles the current firmware with the project-confirmed build command, finds a normal package whose filename contains neither `source` nor `dump`, and flashes it to a connected device through aboot/adownload when requested.
+| Request | Mode | Required context |
+|---|---|---|
+| `出固件` / `编译一个包` | Build only | Build profile; no device or CATStudio |
+| `刷这个包` | Flash existing | Package manifest/hash plus physical device |
+| `编译并刷机` | Build and flash | Build profile plus physical device |
+| `编译刷机抓日志` | Flash and capture | Build/flash receipt plus current CATStudio session |
+
+## Build Only Fast Path
+
+Reuse the task snapshot and invoke the controller once with `-NoFlash`:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\asr3602-local-build-flash\scripts\local_build_flash.ps1" -Repo . -BuildCommand "<project-confirmed command>" -NoFlash
+```
+
+Use the exact verified `normal-test` build profile. Do not read device context,
+probe USB/COM, open CATStudio, or run a second artifact search. Consume the
+controller's package path, SHA256, manifest, and build result.
+
+## Flash Existing Or Build And Flash
+
+For an existing package:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\asr3602-local-build-flash\scripts\local_build_flash.ps1" -Repo . -NoBuild -Package "<firmware.zip>" -Port <confirmed-port>
+```
+
+For build and flash, omit `-NoBuild`/`-NoFlash` and pass the exact build command.
+Immediately before flashing, let the controller revalidate the profile, package
+hash, chip compatibility, and physical USB identity. Do not perform a separate
+flash or reselect the newest ZIP outside the controller.
+
+Reject package names containing `source`, `dump`, or `acceptance`. A COM port is
+transport metadata, not device identity; do not use Bluetooth serial ports.
+
+## Flash And Capture
+
+Enter this mode only when the user explicitly asks for both flashing and current
+log capture. Build once with `-NoFlash -CleanTargetOutput -RequireFreshPackage`,
+then pass that exact package path and SHA256 to the combined flash/capture owner.
+Do not flash once and call CATStudio capture a second time.
+
+Read [flash and capture](references/flash-capture.md) only for this composite
+mode's evidence contract.
 
 ## Boundaries
 
-- Do not update version metadata, create release folders, write release readmes, or upload. If the user says "出版本", "上传", or "release", use the private project-local release workflow from `.codex-project/local.md`.
-- Do not remove `EEHandlerConfig.nvm` or make dump-capable firmware. If the user says "dump 固件", "删看门狗", or "抓 dump", require the owning checkout's `.codex-project\local.md`; this normal-build Skill must never select or flash a dump package.
-- Do not guess build parameters from the repo name alone. Prefer `.codex-project\build.md`, current project notes, recent successful terminal output, or explicit user-provided commands.
-- Preserve unrelated local source changes. Report dirty files before building if they may affect the output.
+- Do not update `yl.h`, create release folders/readmes, upload, or publish. Route
+  formal release and FOTA to their owners.
+- Do not remove watchdog configuration or select/build a Dump package. Route
+  DumpTest to the current project's dump owner.
+- Preserve unrelated local changes. Dirty files may affect reproducibility but
+  do not authorize staging, cleanup, or discard.
+- Do not guess build parameters from a repository name. If the verified profile
+  and user-supplied command disagree, stop with the exact mismatch.
+- Build/package, flash, current-session capture, business evidence, and device/QA
+  acceptance are separate results.
 
-## Workflow
-
-1. Identify context:
-   - Confirm the repo root, branch, short commit, and dirty status.
-   - Read the current project's `AGENTS.md`, `.codex-project\variant.md`, and `.codex-project\build.md` when present.
-   - Confirm the variant fingerprint: `yl_device_ver`, chip, OS, protocol, customer/product variant, build parameters, and Zentao mapping. Refresh it with `asr3601-project-onboard` if it is missing or stale.
-   - Identify the product/protocol variant only as context; do not switch projects or Zentao mappings here.
-
-2. Confirm the build command:
-   - Use the exact command recorded in project context or supplied by the user.
-   - Common examples from this machine are:
-     - ASR3602 watch: `make craneg_modem_watch TARGET_OS=ALIOS PS_MODE=LITE_LTEONLY CHIP_ID=CRANEL`
-     - Product-specific exceptions belong in `.codex-project/build.md`; do not bundle real device/version mappings in this Skill.
-     - ASR3603: `make craneg_modem_watch TARGET_OS=THREADX PS_MODE=LTEGSM CHIP_ID=CRANEG`
-   - If no command is confirmed, ask before compiling.
-
-3. Build and find the artifact:
-   - Prefer `scripts\local_build_flash.ps1` with `-BuildCommand`.
-   - Use the newest `.zip` under `out\product\<target>` whose filename contains neither `source` nor `dump`, unless the package path is explicit.
-   - Reject explicit package paths containing `source` or `dump`; those artifacts do not belong to this normal-flash workflow.
-
-4. Flash when requested:
-   - Run the shared `aa-skill-router/scripts/embedded_target_preflight.ps1` first. Require project/artifact/CHIP_ID/USB identity agreement; COM alone is insufficient.
-   - Prefer an exposed aboot/download MCP if available in the current session.
-   - If no MCP is exposed, use local `adownload.exe` fallback.
-   - Use a confirmed ASR modem/download COM port. Do not use Bluetooth serial ports.
-   - Report final flash status and the package path.
-
-## Script
-
-Run from the repo root or pass `-Repo`:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\asr3602-local-build-flash\scripts\local_build_flash.ps1" -Repo . -BuildCommand "make craneg_modem_watch TARGET_OS=ALIOS PS_MODE=LITE_LTEONLY CHIP_ID=CRANEL"
-```
-
-Useful options:
-
-```powershell
-# Build only and report the selected package.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\asr3602-local-build-flash\scripts\local_build_flash.ps1" -Repo . -BuildCommand "make craneg_modem_watch TARGET_OS=ALIOS PS_MODE=LITE_LTEONLY CHIP_ID=CRANEL" -NoFlash
-
-# Flash an existing package without rebuilding, using a freshly confirmed port.
-$confirmedPort = Read-Host "Confirmed ASR download COM port"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\asr3602-local-build-flash\scripts\local_build_flash.ps1" -Repo . -NoBuild -Package "out\product\craneg_modem_watch\firmware.zip" -Port $confirmedPort
-
-# Dry-run the resolved actions.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\asr3602-local-build-flash\scripts\local_build_flash.ps1" -Repo . -BuildCommand "make craneg_modem_watch TARGET_OS=ALIOS PS_MODE=LITE_LTEONLY CHIP_ID=CRANEL" -DryRun
-```
-
-## Reporting
-
-In the final response, state:
-
-- Build command used.
-- Whether build succeeded or was skipped.
-- Firmware zip selected.
-- Whether flashing succeeded or was skipped.
-- Any dirty files that may affect reproducibility.
+Report only the selected mode's command/result, exact package and SHA256, flash
+target/result when applicable, capture result when applicable, and relevant dirty
+state. Do not print unused-mode fields.

@@ -141,6 +141,7 @@ def snapshot_command(
     detail_concurrency: int,
     bug_ids: str = "",
     status_refresh: bool = False,
+    deep_all: bool = False,
 ) -> list[str]:
     node = shutil.which("node")
     if not node:
@@ -163,21 +164,29 @@ def snapshot_command(
         else:
             command.append("--download-attachments")
     else:
-        command.extend(
-            [
-                "--bug-status",
-                bug_status,
-                "--limit",
-                str(limit),
-                "--detail-concurrency",
-                str(detail_concurrency),
-                "--detail-retries",
-                "2",
-                "--detail-timeout-ms",
-                "60000",
-                "--download-attachments",
-            ]
-        )
+        command.extend(["--bug-status", bug_status, "--limit", str(limit)])
+        if deep_all:
+            command.extend(
+                [
+                    "--detail-concurrency",
+                    str(detail_concurrency),
+                    "--detail-retries",
+                    "2",
+                    "--detail-timeout-ms",
+                    "60000",
+                    "--download-attachments",
+                ]
+            )
+        else:
+            command.extend(
+                [
+                    "--detail-limit",
+                    "0",
+                    "--no-download-attachments",
+                    "--no-work-md",
+                    "--no-memory-link",
+                ]
+            )
     return command
 
 
@@ -188,10 +197,20 @@ def fetch_snapshot(
     detail_concurrency: int,
     bug_ids: str = "",
     status_refresh: bool = False,
+    deep_all: bool = False,
 ) -> Path:
     live = live_context(repo)
     lines = stream_command(
-        snapshot_command(repo, live, bug_status, limit, detail_concurrency, bug_ids, status_refresh),
+        snapshot_command(
+            repo,
+            live,
+            bug_status,
+            limit,
+            detail_concurrency,
+            bug_ids,
+            status_refresh,
+            deep_all,
+        ),
         repo,
         node_environment(),
     )
@@ -218,6 +237,7 @@ def validate_snapshot(
     repo: Path,
     bug_status: str,
     expected_product: str = "",
+    require_details: bool = True,
 ) -> tuple[dict, list[str], dict[str, list[str]], list[str]]:
     payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
     context = payload.get("context") or {}
@@ -246,7 +266,7 @@ def validate_snapshot(
     missing_attachments: dict[str, list[str]] = {}
     for bug in bugs:
         bug_id = str(bug.get("id", "unknown"))
-        if not bug.get("detailFetched"):
+        if require_details and not bug.get("detailFetched"):
             errors.append(f"bug {bug_id} detail was not fetched")
         if bug_status == "active" and str(bug.get("status", "")).strip().lower() not in {
             "active",
@@ -254,9 +274,15 @@ def validate_snapshot(
             "激活中",
         }:
             errors.append(f"bug {bug_id} status is {bug.get('status')}, expected active")
-        if product and normalized_project(bug.get("product")) != normalized_project(product):
+        if (
+            product
+            and bug.get("detailFetched")
+            and normalized_project(bug.get("product")) != normalized_project(product)
+        ):
             errors.append(f"bug {bug_id} product mismatch: {bug.get('product')} != {product}")
 
+        if not require_details:
+            continue
         downloaded = {str(item.get("url", "")): item for item in bug.get("attachments") or []}
         for link in bug.get("attachmentLinks") or []:
             url = str(link.get("href", ""))
@@ -315,6 +341,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bug-status", default="active", choices=("active", "all", "resolved", "closed"))
     parser.add_argument("--limit", type=int, default=80)
     parser.add_argument("--detail-concurrency", type=int, default=4)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--ids", default="", help="Deep-fetch only these comma-separated Bug IDs.")
+    mode.add_argument(
+        "--deep-all",
+        action="store_true",
+        help="Deep-fetch every listed Bug and download its attachments.",
+    )
+    parser.add_argument(
+        "--reconcile",
+        action="store_true",
+        help="Compare with the exact-target baseline and refresh missing tracked Bug statuses.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Check only whether onboarding would run.")
     parser.add_argument("--validate-only", type=Path, help="Validate an existing bugs.json without network access.")
     return parser.parse_args()
@@ -335,8 +373,12 @@ def main() -> int:
         return 0
 
     if args.validate_only:
+        require_details = bool(args.ids) or args.deep_all
         payload, errors, missing, warnings = validate_snapshot(
-            args.validate_only.resolve(), repo, args.bug_status
+            args.validate_only.resolve(),
+            repo,
+            "all" if args.ids else args.bug_status,
+            require_details=require_details,
         )
         print_validation(args.validate_only.resolve(), errors, missing, warnings)
         if variant_is_stale(repo, payload):
@@ -350,8 +392,22 @@ def main() -> int:
     else:
         print("[fast-fetch] action=fetch-directly")
 
-    snapshot = fetch_snapshot(repo, args.bug_status, args.limit, args.detail_concurrency)
-    payload, errors, missing, warnings = validate_snapshot(snapshot, repo, args.bug_status)
+    require_details = bool(args.ids) or args.deep_all
+    expected_status = "all" if args.ids else args.bug_status
+    snapshot = fetch_snapshot(
+        repo,
+        args.bug_status,
+        args.limit,
+        args.detail_concurrency,
+        bug_ids=args.ids,
+        deep_all=args.deep_all,
+    )
+    payload, errors, missing, warnings = validate_snapshot(
+        snapshot,
+        repo,
+        expected_status,
+        require_details=require_details,
+    )
 
     bug_error_ids: set[str] = set()
     context_errors: list[str] = []
@@ -366,8 +422,20 @@ def main() -> int:
         print_validation(snapshot, context_errors, missing, warnings)
         print("[fast-fetch] action=refresh-context-and-refetch-once")
         run_onboard(repo)
-        snapshot = fetch_snapshot(repo, args.bug_status, args.limit, args.detail_concurrency)
-        payload, errors, missing, warnings = validate_snapshot(snapshot, repo, args.bug_status)
+        snapshot = fetch_snapshot(
+            repo,
+            args.bug_status,
+            args.limit,
+            args.detail_concurrency,
+            bug_ids=args.ids,
+            deep_all=args.deep_all,
+        )
+        payload, errors, missing, warnings = validate_snapshot(
+            snapshot,
+            repo,
+            expected_status,
+            require_details=require_details,
+        )
         bug_error_ids = set()
         context_errors = []
         for error in errors:
@@ -382,7 +450,7 @@ def main() -> int:
 
     retry_snapshots: list[Path] = []
     expected_product = str((payload.get("context") or {}).get("productName", ""))
-    retry_ids = sorted(set(missing) | bug_error_ids)
+    retry_ids = sorted(set(missing) | bug_error_ids) if require_details else []
     for bug_id in retry_ids:
         print(f"[fast-fetch] attachment-retry={bug_id}")
         retry = fetch_snapshot(repo, args.bug_status, 1, 1, bug_id)
@@ -400,6 +468,15 @@ def main() -> int:
         context_refresh = "performed-after-fetch"
     else:
         context_refresh = "skipped"
+
+    if not args.reconcile:
+        print_validation(snapshot, context_errors, {}, warnings)
+        mode_name = "selected" if args.ids else ("deep-all" if args.deep_all else "list")
+        print(f"[fast-fetch] mode={mode_name}")
+        print(f"[fast-fetch] context-refresh={context_refresh}")
+        if retry_snapshots:
+            print("[fast-fetch] retry-snapshots=" + ",".join(str(path) for path in retry_snapshots))
+        return 0
 
     reconcile_plan = prepare_refresh(snapshot)
     status_snapshots: list[Path] = []

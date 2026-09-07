@@ -151,6 +151,9 @@ Defaults:
   if (args.reactivateResolved && args.activateClosed) {
     throw new Error("--reactivate-resolved cannot be combined with --activate-closed.");
   }
+  if (args.allowProductMismatch && !args.reactivateResolved) {
+    throw new Error("--allow-product-mismatch requires --reactivate-resolved.");
+  }
   if (args.reactivateResolved && !args.activateCommentExplicit) {
     args.activateComment = "误将非当前项目Bug标记为已解决，现恢复激活状态。";
   }
@@ -317,7 +320,7 @@ function resolveBuildAlias(value, ctx) {
 }
 
 function identityHash(value, length) {
-  return crypto.createHash("sha256").update(`${value || ""}`.trim().replace(/\\/g, "/").toLowerCase(), "utf8").digest("hex").slice(0, length);
+  return crypto.createHash("sha256").update(`${value || ""}`.trim().replace(/\s+/g, " ").replace(/\\/g, "/").toLowerCase(), "utf8").digest("hex").slice(0, length);
 }
 
 function variantValue(repo, label) {
@@ -325,8 +328,10 @@ function variantValue(repo, label) {
   if (!fs.existsSync(variant)) return "";
   const text = fs.readFileSync(variant, "utf8");
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = text.match(new RegExp("^-\\s*" + escaped + "\\s*[：:]\\s*(.+?)\\s*$", "m"));
-  return match ? match[1].trim().replace(/^`|`$/g, "") : "";
+  const matches = [...text.matchAll(new RegExp("^-[ \\t]*" + escaped + "[ \\t]*[：:][ \\t]*(.*?)[ \\t]*$", "gm"))];
+  const values = [...new Set(matches.map((match) => match[1].trim().replace(/^`|`$/g, "")))];
+  if (values.length > 1) throw new Error(`Ambiguous variant field: ${label}`);
+  return values[0] || "";
 }
 
 function memoryTargetContext(ctx, expectedProduct) {
@@ -335,7 +340,7 @@ function memoryTargetContext(ctx, expectedProduct) {
   const version = variantValue(ctx.repo, "`yl_device_ver`") || variantValue(ctx.repo, "yl_device_ver") || "unknown";
   const variantId = expectedProduct ? identityHash(expectedProduct, 12) : "";
   return {
-    target_id: identityHash([repoId, ctx.branch, version, variantId].join("|"), 16),
+    target_id: crypto.createHash("sha256").update([repoId, ctx.branch, version, variantId].map((value) => value.trim().replace(/\s+/g, " ")).join("|"), "utf8").digest("hex").slice(0, 16),
     repo_id: repoId,
     branch: ctx.branch,
     version,
@@ -384,11 +389,54 @@ function productNamesEqual(left, right) {
 }
 
 function expectedProductFromRepo(repo) {
+  const variantPath = path.join(path.resolve(repo), ".codex-project", "variant.md");
+  if (fs.existsSync(variantPath)) {
+    if (variantValue(repo, "映射状态") !== "confirmed") {
+      throw new Error("Zentao product mapping in variant.md is not confirmed.");
+    }
+    const product = usableProduct(variantValue(repo, "禅道产品"));
+    if (!product) throw new Error("Missing confirmed Zentao product in variant.md.");
+    return product;
+  }
+
   const contextPath = path.join(path.resolve(repo), ".codex-project", "zentao.md");
   if (!fs.existsSync(contextPath)) return "";
   const text = fs.readFileSync(contextPath, "utf8");
-  const match = text.match(/禅道项目名：\s*`([^`]+)`/) || text.match(/Zentao项目：\s*`?([^`\r\n]+)`?/i);
-  return match ? match[1].trim() : "";
+  const matches = [...text.matchAll(/(?:禅道项目名|Zentao项目)[：:][ \t]*`?([^`\r\n]+)`?/gi)];
+  const products = [...new Set(matches.map((match) => usableProduct(match[1])).filter(Boolean))];
+  if (products.length > 1) throw new Error("Ambiguous legacy Zentao product mapping.");
+  return products[0] || "";
+}
+
+function usableProduct(value) {
+  const product = `${value || ""}`.trim();
+  return /^(?:未确认|不可用|unknown|none|needs-confirmation)$/i.test(product) ? "" : product;
+}
+
+function requireProductContext(args) {
+  if (args.allowProductMismatch) {
+    if (!args.reactivateResolved) throw new Error("Product mismatch override requires corrective reactivation.");
+    return;
+  }
+  if (!usableProduct(args.expectedProduct)) {
+    throw new Error("Missing confirmed Zentao product; resolve the project mapping before preview or submit.");
+  }
+}
+
+function resolveExpectedProduct(args, ctx) {
+  if (args.allowProductMismatch && args.reactivateResolved) return usableProduct(args.expectedProduct);
+  const mapped = expectedProductFromRepo(ctx.repo);
+  const explicit = usableProduct(args.expectedProduct);
+  if (explicit && mapped && !productNamesEqual(explicit, mapped)) {
+    throw new Error("Explicit Zentao product differs from the confirmed project mapping.");
+  }
+  const branch = variantValue(ctx.repo, "branch");
+  if (branch && ctx.branch && branch !== ctx.branch) {
+    throw new Error("Zentao product mapping belongs to a different branch; refresh variant.md.");
+  }
+  const product = explicit || mapped;
+  requireProductContext({ ...args, expectedProduct: product });
+  return product;
 }
 
 function validateItems(items, defaults, ctx) {
@@ -661,6 +709,7 @@ function formValue(formData, key) {
 }
 
 async function processBug(page, args, item) {
+  requireProductContext(args);
   const beforeInfo = await readBugInfo(page, args.siteUrl, item.id);
   let activated = false;
   let activationPlanned = false;
@@ -870,9 +919,9 @@ function markdownReport(ctx, args, results) {
 
 async function main() {
   const args = parseArgs(process.argv);
-  args.siteUrl = args.siteUrl || loadSiteUrl();
   const ctx = repoContext(args.repo);
-  args.expectedProduct = args.expectedProduct || expectedProductFromRepo(ctx.repo);
+  args.expectedProduct = resolveExpectedProduct(args, ctx);
+  args.siteUrl = args.siteUrl || loadSiteUrl();
   const items = loadPlan(args);
   validateItems(items, args, ctx);
   const outDir = ensureOutputDir(args, ctx, items);
@@ -938,4 +987,6 @@ module.exports = {
   identityHash,
   memoryTargetContext,
   expectedProductFromRepo,
+  resolveExpectedProduct,
+  processBug,
 };

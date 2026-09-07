@@ -11,7 +11,16 @@ INSTALL_OBSIDIAN="${INSTALL_OBSIDIAN:-1}"
 
 if [ "$INSTALL_SKILLS" = "1" ]; then
   mkdir -p "$CODEX_HOME/skills"
-  cp -R "$REPO_ROOT/skills/." "$CODEX_HOME/skills/"
+  public_skills="$(python3 -c 'import json, sys; print("\n".join(json.load(open(sys.argv[1], encoding="utf-8"))["skills"]))' "$REPO_ROOT/public-sync-manifest.json")"
+  while IFS= read -r skill_name; do
+    skill_source="$REPO_ROOT/skills/$skill_name"
+    mkdir -p "$CODEX_HOME/skills/$skill_name"
+    cp -R "$skill_source/." "$CODEX_HOME/skills/$skill_name/"
+  done <<< "$public_skills"
+  if [ -d "$REPO_ROOT/runtime" ]; then
+    mkdir -p "$CODEX_HOME/scripts"
+    cp -R "$REPO_ROOT/runtime/." "$CODEX_HOME/scripts/"
+  fi
   echo "已安装 skills 到 $CODEX_HOME/skills"
   if [ -d "$REPO_ROOT/skills-index" ]; then
     mkdir -p "$CODEX_HOME/skills-index"

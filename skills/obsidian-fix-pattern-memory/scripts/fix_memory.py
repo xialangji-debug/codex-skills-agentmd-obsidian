@@ -16,10 +16,13 @@ from typing import Any
 
 
 DEFAULT_ROOT = Path.home() / "Documents" / "Obsidian" / "CodexVault" / "Codex" / "fix-patterns"
+DEFAULT_ACTIVE_PROJECTS = Path.home() / ".codex" / "active-projects.json"
 STATE_START = "<!-- codex-fix-state:start -->"
 STATE_END = "<!-- codex-fix-state:end -->"
 STATE_PREFIX = "<!-- codex-fix-state-json:"
 SCHEMA_VERSION = 2
+ALLOWED_DOMAINS = {"asr", "esp32"}
+DOMAIN_BY_FAMILY = {"asr360x": "asr", "esp32": "esp32"}
 
 IMPLEMENTATION_STATES = {"not_applied", "applied", "committed", "superseded", "failed"}
 VERIFICATION_STATES = {
@@ -198,8 +201,115 @@ def set_frontmatter(text: str, key: str, value: str) -> str:
     yaml = match.group(1)
     pattern = re.compile(rf"^{re.escape(key)}:\s*.*$", re.M)
     replacement = f"{key}: {value}"
-    yaml = pattern.sub(replacement, yaml, count=1) if pattern.search(yaml) else yaml.rstrip() + "\n" + replacement
+    yaml = pattern.sub(lambda _: replacement, yaml, count=1) if pattern.search(yaml) else yaml.rstrip() + "\n" + replacement
     return "---\n" + yaml + "\n---\n" + text[match.end():]
+
+
+def frontmatter_domains(text: str) -> list[str]:
+    match = re.match(r"\A---\r?\n(.*?)\r?\n---\r?\n", text, re.S)
+    if not match:
+        raise ValueError("Fix-pattern note is missing YAML frontmatter")
+    lines = match.group(1).splitlines()
+    for index, line in enumerate(lines):
+        field = re.match(r"^domains:\s*(.*?)\s*$", line)
+        if not field:
+            continue
+        inline = field.group(1).strip()
+        if inline:
+            if inline == "[]":
+                return []
+            if inline.startswith("[") and inline.endswith("]"):
+                return [item.strip().strip("'\"") for item in inline[1:-1].split(",") if item.strip()]
+            return [inline.strip("'\"")]
+        values: list[str] = []
+        for child in lines[index + 1 :]:
+            item = re.match(r"^\s+-\s*(.+?)\s*$", child)
+            if item:
+                values.append(item.group(1).strip().strip("'\""))
+                continue
+            if child.strip() and not child.startswith((" ", "\t")):
+                break
+        return values
+    raise ValueError("Fix-pattern note is missing domains frontmatter")
+
+
+def set_frontmatter_domains(text: str, domain: str) -> str:
+    if domain not in {*ALLOWED_DOMAINS, "none"}:
+        raise ValueError(f"Unsupported domain: {domain}")
+    match = re.match(r"\A---\r?\n(.*?)\r?\n---\r?\n", text, re.S)
+    if not match:
+        raise ValueError("Fix-pattern note is missing YAML frontmatter")
+    lines = match.group(1).splitlines()
+    start = next((index for index, line in enumerate(lines) if re.match(r"^domains:\s*", line)), None)
+    if start is None:
+        raise ValueError("Fix-pattern note is missing domains frontmatter")
+    end = start + 1
+    while end < len(lines) and (not lines[end].strip() or lines[end].startswith((" ", "\t"))):
+        end += 1
+    replacement = ["domains: []"] if domain == "none" else ["domains:", f"  - {domain}"]
+    yaml = "\n".join(lines[:start] + replacement + lines[end:])
+    return "---\n" + yaml + "\n---\n" + text[match.end():]
+
+
+def load_active_projects(path: Path) -> list[dict[str, Any]]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    payload = json.loads(text)
+    return [item for item in payload.get("projects") or [] if item.get("enabled", True)]
+
+
+def project_domain(item: dict[str, Any]) -> str:
+    return DOMAIN_BY_FAMILY.get(compact(item.get("family")).lower(), "")
+
+
+def infer_domain(repo_arg: str, project_key: str, active_projects: Path) -> tuple[str, str]:
+    entries = load_active_projects(active_projects)
+    key = compact(project_key).casefold()
+    repo = Path(repo_arg).expanduser().resolve()
+    matches: list[tuple[str, str]] = []
+    for item in entries:
+        domain = project_domain(item)
+        if not domain:
+            continue
+        item_key = compact(item.get("project_key")).casefold()
+        raw_path = compact(item.get("path"))
+        path_match = bool(raw_path) and Path(raw_path).expanduser().resolve() == repo
+        if (key and item_key == key) or path_match:
+            matches.append((domain, item_key or raw_path))
+    domains = {domain for domain, _ in matches}
+    if len(domains) == 1:
+        return next(iter(domains)), ",".join(sorted({source for _, source in matches}))
+    return "", ""
+
+
+def note_domain_suggestion(
+    path: Path,
+    text: str,
+    state: dict[str, Any] | None,
+    active_projects: Path,
+) -> tuple[str, str]:
+    entries = load_active_projects(active_projects)
+    by_key = {
+        compact(item.get("project_key")).casefold(): project_domain(item)
+        for item in entries
+        if project_domain(item)
+    }
+    target_domains = {
+        by_key.get(compact(target.get("project_key")).casefold(), "")
+        for target in (state or {}).get("targets", [])
+    }
+    target_domains.discard("")
+    if len(target_domains) == 1:
+        return next(iter(target_domains)), "managed_target_project"
+    if len(target_domains) > 1:
+        return "", "ambiguous_managed_targets"
+    title_match = re.search(r"^#\s+(.+?)\s*$", text, re.M)
+    title = title_match.group(1) if title_match else ""
+    if re.search(r"(?i)(?:^|[^a-z0-9])esp32(?:[-_ ]?c5)?(?:[^a-z0-9]|$)", f"{path.stem} {title}"):
+        return "esp32", "esp32_filename_or_title"
+    return "", "no_high_confidence_signal"
 
 
 def empty_state(fix_id: str) -> dict[str, Any]:
@@ -267,7 +377,7 @@ def replace_state_block(text: str, state: dict[str, Any]) -> str:
     block = render_state(state)
     pattern = re.compile(rf"{re.escape(STATE_START)}[\s\S]*?{re.escape(STATE_END)}\s*", re.M)
     if pattern.search(text):
-        return pattern.sub(block, text, count=1)
+        return pattern.sub(lambda _: block, text, count=1)
     heading = "\n## 目标应用状态\n\n"
     insert = text.find("\n## 关键词")
     if insert >= 0:
@@ -275,11 +385,11 @@ def replace_state_block(text: str, state: dict[str, Any]) -> str:
     return text.rstrip() + heading + block
 
 
-def note_template(title: str, fix_id: str) -> str:
+def note_template(title: str, fix_id: str, domain: str = "asr") -> str:
+    domain_yaml = "domains: []" if domain == "none" else f"domains:\n  - {domain}"
     return f"""---
 area: engineering
-domains:
-  - asr
+{domain_yaml}
 scope:
   - topic/fix-pattern
 kind: fix-pattern
@@ -334,13 +444,12 @@ def set_section(text: str, heading: str, values: list[str]) -> str:
         return text
     body = "\n".join(f"- {value}" for value in clean)
     pattern = re.compile(
-        rf"(^##\s+{re.escape(heading)}\s*$\r?\n)([\s\S]*?)(?=^##\s+|\Z)",
+        rf"(^##[ \t]+{re.escape(heading)}[ \t]*\r?\n)([\s\S]*?)(?=^##[ \t]+|\Z)",
         re.M,
     )
-    replacement = rf"\1\n{body}\n\n"
     if pattern.search(text):
-        return pattern.sub(replacement, text, count=1)
-    return text.rstrip() + f"\n\n## {heading}\n\n{body}\n"
+        return pattern.sub(lambda match: match[1] + "\n" + body + "\n\n", text, count=1)
+    return text.rstrip() + f"\n\n## {heading}\n\n{body}\n\n"
 
 
 def update_knowledge_sections(text: str, args: argparse.Namespace) -> str:
@@ -352,14 +461,14 @@ def update_knowledge_sections(text: str, args: argparse.Namespace) -> str:
         ("关键文件和函数", getattr(args, "key_file", [])),
         ("修复思路", [getattr(args, "fix", "")]),
         ("验证方法", [getattr(args, "verification_method", "")]),
-        ("注意事项", [getattr(args, "caution", "")]),
+        ("注意事项", getattr(args, "caution", [])),
     ]
     for heading, values in fields:
         text = set_section(text, heading, values)
     return text
 
 
-def load_note(path: Path, title: str = "") -> tuple[str, dict[str, Any]]:
+def load_note(path: Path, title: str = "", domain: str = "asr") -> tuple[str, dict[str, Any]]:
     if path.exists():
         text = path.read_text(encoding="utf-8", errors="replace")
         state = decode_state(text)
@@ -370,7 +479,7 @@ def load_note(path: Path, title: str = "") -> tuple[str, dict[str, Any]]:
     if not title:
         raise ValueError("--title is required when creating a new note")
     fix_id = make_fix_id(title)
-    return note_template(title, fix_id), empty_state(fix_id)
+    return note_template(title, fix_id, domain), empty_state(fix_id)
 
 
 def target_by_id(state: dict[str, Any], target_id: str) -> dict[str, Any] | None:
@@ -484,7 +593,21 @@ def command_upsert(args: argparse.Namespace) -> int:
     creating = not note.exists()
     if creating and args.write and not all([compact(args.symptoms), compact(args.root_cause), compact(args.fix)]):
         raise SystemExit("A new written note requires --symptoms, --root-cause, and --fix")
-    text, state = load_note(note, args.title)
+    domain = compact(args.domain)
+    if creating and not domain:
+        domain, source = infer_domain(
+            args.repo,
+            args.project_key,
+            Path(args.active_projects).expanduser().resolve(),
+        )
+        if not domain:
+            raise SystemExit(
+                "Cannot infer domain from --repo/--project-key; pass --domain asr, esp32, or none explicitly"
+            )
+        print(f"domain_inferred={domain} source={source}")
+    text, state = load_note(note, args.title, domain or "asr")
+    if domain and not creating:
+        text = set_frontmatter_domains(text, domain)
     text = update_knowledge_sections(text, args)
     updates = {
         "implementation": args.implementation,
@@ -571,36 +694,108 @@ def command_apply_events(args: argparse.Namespace) -> int:
 
 def command_validate(args: argparse.Namespace) -> int:
     root = Path(args.root).expanduser().resolve()
+    active_projects = Path(args.active_projects).expanduser().resolve()
     errors: list[str] = []
     fix_ids: dict[str, Path] = {}
     managed = 0
     legacy = 0
+    domain_counts = {"asr": 0, "esp32": 0, "none": 0}
+    domain_mismatches: list[dict[str, str]] = []
     for note in fix_notes(root):
         text = note.read_text(encoding="utf-8", errors="replace")
+        try:
+            domains = frontmatter_domains(text)
+        except ValueError as error:
+            errors.append(f"{note.name}: {error}")
+            domains = []
+        invalid_domains = sorted(set(domains) - ALLOWED_DOMAINS)
+        if invalid_domains or len(domains) > 1:
+            errors.append(f"{note.name}: invalid domains {domains}")
+        current_domain = domains[0] if len(domains) == 1 else "none"
+        if not invalid_domains and len(domains) <= 1:
+            domain_counts[current_domain] += 1
         try:
             state = decode_state(text)
         except ValueError as error:
             errors.append(f"{note.name}: {error}")
-            continue
+            state = None
         if not state:
             legacy += 1
-            continue
-        managed += 1
-        fix_id = state.get("fix_id")
-        if not fix_id:
-            errors.append(f"{note.name}: missing fix_id")
-        elif fix_id in fix_ids:
-            errors.append(f"{note.name}: duplicate fix_id with {fix_ids[fix_id].name}")
         else:
-            fix_ids[fix_id] = note
-        target_ids: set[str] = set()
-        for target in state.get("targets", []):
-            target_id = target.get("target_id")
-            if not target_id or target_id in target_ids:
-                errors.append(f"{note.name}: missing or duplicate target_id {target_id}")
-            target_ids.add(target_id)
-    print(json.dumps({"managed": managed, "legacy": legacy, "errors": errors}, ensure_ascii=False, indent=2))
+            managed += 1
+            fix_id = state.get("fix_id")
+            if not fix_id:
+                errors.append(f"{note.name}: missing fix_id")
+            elif fix_id in fix_ids:
+                errors.append(f"{note.name}: duplicate fix_id with {fix_ids[fix_id].name}")
+            else:
+                fix_ids[fix_id] = note
+            target_ids: set[str] = set()
+            for target in state.get("targets", []):
+                target_id = target.get("target_id")
+                if not target_id or target_id in target_ids:
+                    errors.append(f"{note.name}: missing or duplicate target_id {target_id}")
+                target_ids.add(target_id)
+        suggestion, reason = note_domain_suggestion(note, text, state, active_projects)
+        if suggestion and suggestion != current_domain:
+            domain_mismatches.append(
+                {"note": note.name, "current": current_domain, "suggested": suggestion, "reason": reason}
+            )
+    print(json.dumps({
+        "managed": managed,
+        "legacy": legacy,
+        "domains": domain_counts,
+        "domain_mismatches": domain_mismatches,
+        "errors": errors,
+    }, ensure_ascii=False, indent=2))
     return 1 if errors else 0
+
+
+def command_audit_domains(args: argparse.Namespace) -> int:
+    root = Path(args.root).expanduser().resolve()
+    active_projects = Path(args.active_projects).expanduser().resolve()
+    rows: list[dict[str, Any]] = []
+    changed: list[str] = []
+    for note in fix_notes(root):
+        text = note.read_text(encoding="utf-8", errors="replace")
+        try:
+            domains = frontmatter_domains(text)
+        except ValueError as error:
+            rows.append({"note": note.name, "status": "invalid", "reason": str(error)})
+            continue
+        current = domains[0] if len(domains) == 1 else "none"
+        try:
+            state = decode_state(text)
+        except ValueError:
+            state = None
+        suggested, reason = note_domain_suggestion(note, text, state, active_projects)
+        status = "match" if suggested and suggested == current else "mismatch" if suggested else "uncertain"
+        row: dict[str, Any] = {
+            "note": note.name,
+            "current": current,
+            "suggested": suggested or None,
+            "reason": reason,
+            "status": status,
+        }
+        should_write = (
+            args.write
+            and status == "mismatch"
+            and (args.only_domain == "all" or suggested == args.only_domain)
+        )
+        if should_write:
+            atomic_write(note, set_frontmatter_domains(text, suggested))
+            row["written"] = True
+            changed.append(note.name)
+        rows.append(row)
+    print(json.dumps({
+        "scanned": len(rows),
+        "mismatches": sum(row.get("status") == "mismatch" for row in rows),
+        "uncertain": sum(row.get("status") == "uncertain" for row in rows),
+        "changed": changed,
+        "write": bool(args.write),
+        "rows": rows,
+    }, ensure_ascii=False, indent=2))
+    return 0
 
 
 def command_migrate(args: argparse.Namespace) -> int:
@@ -701,6 +896,8 @@ def build_parser() -> argparse.ArgumentParser:
     upsert.add_argument("--verification", choices=sorted(VERIFICATION_STATES), default="static_checked")
     upsert.add_argument("--zentao", choices=sorted(ZENTAO_STATES), default="unknown")
     upsert.add_argument("--relation", choices=sorted(RELATION_STATES), default="applied")
+    upsert.add_argument("--domain", choices=["asr", "esp32", "none"], default="")
+    upsert.add_argument("--active-projects", default=str(DEFAULT_ACTIVE_PROJECTS))
     upsert.add_argument("--write", action="store_true")
     upsert.add_argument("--keyword", action="append", default=[])
     upsert.add_argument("--scope", action="append", default=[])
@@ -727,7 +924,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     validate = sub.add_parser("validate")
     validate.add_argument("--root", default=str(DEFAULT_ROOT))
+    validate.add_argument("--active-projects", default=str(DEFAULT_ACTIVE_PROJECTS))
     validate.set_defaults(func=command_validate)
+
+    audit_domains = sub.add_parser("audit-domains")
+    audit_domains.add_argument("--root", default=str(DEFAULT_ROOT))
+    audit_domains.add_argument("--active-projects", default=str(DEFAULT_ACTIVE_PROJECTS))
+    audit_domains.add_argument("--only-domain", choices=["all", "asr", "esp32"], default="all")
+    audit_domains.add_argument("--write", action="store_true")
+    audit_domains.set_defaults(func=command_audit_domains)
 
     migrate = sub.add_parser("migrate")
     migrate.add_argument("--root", default=str(DEFAULT_ROOT))
@@ -739,7 +944,7 @@ def build_parser() -> argparse.ArgumentParser:
     candidates.add_argument("--note", required=True)
     candidates.add_argument(
         "--active-projects",
-        default=str(Path.home() / ".codex" / "active-projects.json"),
+        default=str(DEFAULT_ACTIVE_PROJECTS),
     )
     candidates.add_argument("--include-recorded", action="store_true")
     candidates.add_argument("--all-families", action="store_true")

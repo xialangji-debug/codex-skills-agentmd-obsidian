@@ -8,11 +8,14 @@ skills, and it never edits an index automatically.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable
+
+import yaml
 
 
 HOME = Path.home()
@@ -146,6 +149,23 @@ def discover_skill_records(root: Path, source: str) -> tuple[list[SkillRecord], 
     return records, invalid_dirs
 
 
+def _resolve_active_plugin_version(plugin_root: Path) -> Path | None:
+    """Return the concrete version selected by a valid `latest` link."""
+    latest = plugin_root / "latest"
+    if not latest.exists():
+        return None
+
+    try:
+        resolved_root = plugin_root.resolve(strict=True)
+        resolved_version = latest.resolve(strict=True)
+    except OSError:
+        return None
+
+    if not resolved_version.is_dir() or resolved_version.parent != resolved_root:
+        return None
+    return resolved_version
+
+
 def discover_plugin_records(root: Path | None) -> tuple[list[SkillRecord], list[str]]:
     if root is None:
         return [], []
@@ -153,12 +173,11 @@ def discover_plugin_records(root: Path | None) -> tuple[list[SkillRecord], list[
         return [], [f"missing optional plugin cache: {root}"]
 
     records: list[SkillRecord] = []
+    active_versions: dict[Path, Path | None] = {}
     for skill_md in sorted(root.rglob("SKILL.md"), key=lambda path: str(path).lower()):
         relative = skill_md.relative_to(root)
         parts = relative.parts
-        # Plugin caches expose a `latest` junction beside the concrete version.
-        # Count the concrete version only, otherwise every current plugin looks
-        # like a duplicate registration.
+        # `latest` may be traversed on platforms that follow directory links.
         if "latest" in parts:
             continue
         try:
@@ -168,6 +187,20 @@ def discover_plugin_records(root: Path | None) -> tuple[list[SkillRecord], list[
         if skills_index < 2:
             continue
         plugin_name = parts[1]
+
+        # Versioned caches use provider/plugin/version/skills. When `latest`
+        # selects a valid sibling version, historical versions are cache only,
+        # not additional registrations. Without a valid pointer, retain the
+        # old scan-all behavior so an ambiguous cache remains visible.
+        if skills_index >= 3:
+            plugin_root = root / parts[0] / plugin_name
+            if plugin_root not in active_versions:
+                active_versions[plugin_root] = _resolve_active_plugin_version(plugin_root)
+            active_version = active_versions[plugin_root]
+            version_root = plugin_root / parts[2]
+            if active_version is not None and version_root.resolve() != active_version:
+                continue
+
         raw = validate_skill_record(skill_md, "plugin", managed_plugin=True)
         records.append(
             SkillRecord(
@@ -292,6 +325,51 @@ def _plugin_alternatives(name: str, plugin_names: Iterable[str]) -> list[str]:
     )
 
 
+def audit_archive_inventory(args: argparse.Namespace, disabled_names: set[str]) -> tuple[list[str], bool]:
+    manifest = getattr(args, "retired_skills", None) or args.active_root.parent / "retired-skills.yaml"
+    index = getattr(args, "archive_index", None) or args.active_root.parent / "skills-index" / "archive" / "index.md"
+    if not manifest.exists() and not index.exists() and not getattr(args, "retired_skills", None) and not getattr(args, "archive_index", None):
+        return [], False
+    issues: list[str] = []
+    try:
+        data = yaml.safe_load(manifest.read_text(encoding="utf-8-sig"))
+        if not isinstance(data, dict) or not isinstance(data.get("skills"), list):
+            raise ValueError("retirement manifest requires a skills list")
+        names = []
+        for entry in data["skills"]:
+            if not isinstance(entry, dict) or not isinstance(entry.get("name"), str) or not SKILL_NAME_RE.fullmatch(entry["name"]):
+                raise ValueError("each archived entry requires a valid skill name")
+            names.append(entry["name"])
+        if len(names) != len(set(names)):
+            issues.append("duplicate archived names in retirement manifest")
+        if set(names) != disabled_names:
+            issues.append(f"retirement manifest differs from disabled folders: {sorted(set(names) ^ disabled_names)}")
+        if data.get("review_after") and dt.date.fromisoformat(str(data["review_after"])) < dt.date.today():
+            issues.append("retirement manifest has an expired review_after date")
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        issues.append(f"{manifest}: {exc}")
+    try:
+        lines = index.read_text(encoding="utf-8-sig").splitlines()
+        listed: list[str] = []
+        in_entries = False
+        found_section = False
+        for line in lines:
+            if line.startswith("## "):
+                in_entries = line.strip() == "## Archived Entries"
+                found_section |= in_entries
+            elif in_entries:
+                match = re.match(r"^\|\s*`([a-z0-9-]+)`\s*\|", line)
+                if match:
+                    listed.append(match.group(1))
+        if not found_section:
+            issues.append("archive index requires an Archived Entries section for current recoverable folders")
+        if len(listed) != len(set(listed)) or set(listed) != disabled_names:
+            issues.append(f"archive index differs from disabled folders: {sorted(set(listed) ^ disabled_names)}")
+    except (OSError, UnicodeError) as exc:
+        issues.append(f"{index}: {exc}")
+    return issues, True
+
+
 def build_audit(args: argparse.Namespace) -> dict[str, Any]:
     active_records, active_invalid = discover_skill_records(args.active_root, "active")
     disabled_records, disabled_invalid = discover_skill_records(args.disabled_root, "disabled")
@@ -301,8 +379,14 @@ def build_audit(args: argparse.Namespace) -> dict[str, Any]:
     disabled_refs, disabled_index_errors = extract_disabled_references(args.index)
 
     active_names = {record.name for record in active_records}
+    personal_names = {record.name for record in active_records if record.source == "active"}
+    system_names = active_names - personal_names
     disabled_names = {record.name for record in disabled_records}
-    plugin_names = {record.name for record in plugin_records} | available_names
+    cached_names = {record.name for record in plugin_records}
+    plugin_names = cached_names | available_names
+    exposure_known = args.available_names_file is not None and not available_errors
+    available_keys = {name.casefold() for name in available_names}
+    archive_issues, archive_checked = audit_archive_inventory(args, disabled_names)
 
     active_map = _casefold_map(active_names)
     disabled_map = _casefold_map(disabled_names)
@@ -320,6 +404,8 @@ def build_audit(args: argparse.Namespace) -> dict[str, Any]:
         alternatives = _plugin_alternatives(route.name, plugin_names)
         if key in active_map or key in plugin_map:
             route_data["resolved_as"] = active_map.get(key) or plugin_map.get(key)
+            route_data["registration"] = "registered" if key in active_map else "plugin-cache" if route.name in cached_names else "session-only"
+            route_data["exposure"] = ("visible" if key in available_keys else "not-exposed") if exposure_known else "unknown"
             valid_routes.append(route_data)
             continue
         if key in disabled_map:
@@ -377,7 +463,14 @@ def build_audit(args: argparse.Namespace) -> dict[str, Any]:
         },
         "summary": {
             "active": len(active_records),
+            "personal": len(personal_names),
+            "system": len(system_names),
             "disabled": len(disabled_records),
+            "plugin_cache_candidates": len(cached_names),
+            "session_visible": len(available_names) if exposure_known else None,
+            "session_plugins": sum(":" in name for name in available_names) if exposure_known else None,
+            "archive_checked": archive_checked,
+            "archive_issues": len(archive_issues),
             "plugins_or_available": len(plugin_names),
             "valid_routes": len(valid_routes),
             "stale_routes": len(stale_routes),
@@ -389,6 +482,13 @@ def build_audit(args: argparse.Namespace) -> dict[str, Any]:
             "stale_disabled_records": len(stale_disabled_records),
         },
         "active": sorted(active_names, key=str.lower),
+        "personal": sorted(personal_names, key=str.lower),
+        "system": sorted(system_names, key=str.lower),
+        "plugin_cache_candidates": sorted(cached_names, key=str.lower),
+        "session_visible": sorted(available_names, key=str.lower) if exposure_known else None,
+        "registered_not_exposed": sorted(name for name in active_names if name.casefold() not in available_keys) if exposure_known else None,
+        "disabled_but_exposed": sorted(name for name in disabled_names if name.casefold() in available_keys) if exposure_known else None,
+        "archive_issues": archive_issues,
         "disabled": sorted(disabled_names, key=str.lower),
         "plugins_or_available": sorted(plugin_names, key=str.lower),
         "valid_routes": valid_routes,
@@ -423,9 +523,17 @@ def print_text_report(report: dict[str, Any]) -> None:
     for key, value in summary.items():
         print(f"- {key}: {value}")
 
-    _print_items("Active skills", report["active"])
+    _print_items("Registered personal skills", report["personal"])
+    _print_items("Registered system skills", report["system"])
     _print_items("Disabled skills", report["disabled"])
-    _print_items("Plugin/available skills", report["plugins_or_available"])
+    _print_items("Plugin cache candidates (not proof of session exposure)", report["plugin_cache_candidates"])
+    if report["session_visible"] is None:
+        print("\nSession exposure: unknown; provide --available-names-file to check it.")
+    else:
+        _print_items("Session-visible skills", report["session_visible"])
+        _print_items("Registered but not exposed", report["registered_not_exposed"])
+        _print_items("Disabled but still exposed in the supplied catalog", report["disabled_but_exposed"])
+    _print_items("Archive inventory issues", report["archive_issues"])
 
     _print_items(
         "Stale recommended routes",
@@ -475,6 +583,7 @@ def run(args: argparse.Namespace) -> int:
             + summary["frontmatter_issues"]
             + summary["invalid"]
             + summary["stale_disabled_records"]
+            + summary["archive_issues"]
         )
         return 2 if blocking else 0
     return 0
@@ -487,6 +596,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--index", type=Path, default=DEFAULT_INDEX)
     parser.add_argument("--plugin-cache", type=Path, default=DEFAULT_PLUGIN_CACHE)
     parser.add_argument("--available-names-file", type=Path)
+    parser.add_argument("--retired-skills", type=Path)
+    parser.add_argument("--archive-index", type=Path)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--strict", action="store_true")
     return parser

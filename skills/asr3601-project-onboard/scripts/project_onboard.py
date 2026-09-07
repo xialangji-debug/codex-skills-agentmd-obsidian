@@ -7,9 +7,11 @@ import argparse
 import hashlib
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
+
+import yaml
 
 
 SKILLS_ROOT = Path(__file__).resolve().parents[2]
@@ -82,124 +84,71 @@ def read_yl(repo: Path) -> dict[str, str]:
     return values
 
 
-def clean_value(value: str) -> str:
-    value = value.strip().strip("\"'")
-    if value.startswith("- "):
-        value = value[2:].strip()
-    return value.strip().strip("\"'")
-
-
-def line_indent(line: str) -> int:
-    return len(line) - len(line.lstrip(" "))
-
-
-def collect_list(block: str, key: str) -> list[str]:
-    values: list[str] = []
-    lines = block.splitlines()
-    for i, line in enumerate(lines):
-        m = re.match(rf"^(\s*){re.escape(key)}:\s*(.*)$", line)
-        if not m:
-            continue
-        key_indent = len(m.group(1))
-        inline = m.group(2).strip()
-        if inline:
-            return [clean_value(inline)]
-        for child in lines[i + 1 :]:
-            if not child.strip():
-                continue
-            if line_indent(child) <= key_indent:
-                break
-            item = re.match(r"^\s*-\s*(.+?)\s*$", child)
-            if item:
-                values.append(clean_value(item.group(1)))
-        break
-    return values
-
-
-def collect_scalar(block: str, key: str) -> str:
-    m = re.search(rf"^\s*{re.escape(key)}:\s*(.+?)\s*$", block, re.M)
-    return clean_value(m.group(1)) if m else ""
-
-
-def normalize_entry(block: str) -> str:
-    lines = block.splitlines()
-    if lines and lines[0].startswith("- "):
-        lines[0] = lines[0][2:]
-    return "\n".join(lines)
-
-
-def yaml_blocks(text: str) -> list[str]:
-    return re.findall(r"```yaml\s*(.*?)```", text, flags=re.S)
-
-
-def split_yaml_entries(block: str) -> list[str]:
-    entries: list[str] = []
-    current: list[str] = []
-    for line in block.splitlines():
-        if re.match(r"^-\s+(branch_contains|local_tokens):", line):
-            if current:
-                entries.append(normalize_entry("\n".join(current)))
-            current = [line]
-        elif current:
-            current.append(line)
-    if current:
-        entries.append(normalize_entry("\n".join(current)))
-    return entries
-
-
 def parse_project_map(path: Path) -> list[tuple[list[str], list[str], list[str], Mapping]]:
     if not path.exists():
         return []
     text = path.read_text(encoding="utf-8", errors="replace")
-    entries: list[str] = []
-    for block in yaml_blocks(text):
-        entries.extend(split_yaml_entries(block))
-
     parsed = []
-    for block in entries:
-        branches = collect_list(block, "branch_contains")
-        yl_versions = collect_list(block, "yl_device_ver_contains")
-        local_tokens = collect_list(block, "local_tokens")
-        names = collect_list(block, "zentao_names")
-        product_names = collect_list(block, "product_names")
-        if not names:
-            candidate = collect_scalar(block, "candidate")
-            if candidate:
-                names = [candidate]
-        mapping = Mapping(
-            zentao_names=names,
-            product_names=product_names,
-            project_id=collect_scalar(block, "project_id"),
-            product_id=collect_scalar(block, "product_id"),
-            verified=collect_scalar(block, "verified"),
-            note=collect_scalar(block, "note"),
-            status=collect_scalar(block, "status"),
-        )
-        parsed.append((branches, yl_versions, local_tokens, mapping))
+
+    def values(entry: dict, key: str) -> list[str]:
+        value = entry.get(key)
+        if value is None:
+            return []
+        return [str(item).strip() for item in (value if isinstance(value, list) else [value]) if item is not None and str(item).strip()]
+
+    def scalar(entry: dict, key: str) -> str:
+        value = entry.get(key)
+        return str(value).strip() if value is not None else ""
+
+    for block in re.findall(r"^[ \t]*\x60\x60\x60yaml[ \t]*\r?\n(.*?)^[ \t]*\x60\x60\x60[ \t]*$", text, flags=re.S | re.M):
+        try:
+            entries = yaml.safe_load(block)
+        except yaml.YAMLError as exc:
+            raise ValueError("Invalid YAML in project map; correct it before using project identity.") from exc
+        if not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries):
+            raise ValueError("Project-map YAML must contain a list of mapping objects.")
+        for entry in entries:
+            names = values(entry, "zentao_names") or values(entry, "candidate")
+            mapping = Mapping(
+                zentao_names=names,
+                product_names=values(entry, "product_names"),
+                project_id=scalar(entry, "project_id"),
+                product_id=scalar(entry, "product_id"),
+                verified=scalar(entry, "verified"),
+                note=scalar(entry, "note"),
+                status=scalar(entry, "status"),
+            )
+            parsed.append((values(entry, "branch_contains"), values(entry, "yl_device_ver_contains"), values(entry, "local_tokens"), mapping))
     return parsed
 
 
 def match_mapping(info: RepoInfo) -> Mapping:
-    best: Mapping | None = None
+    matches: list[Mapping] = []
+    candidates: list[Mapping] = []
     tokens_text = " ".join([info.name, info.branch, info.yl_device_name, info.yl_device_ver, info.yl_hw_ver])
     for branches, yl_versions, local_tokens, mapping in parse_project_map(PROJECT_MAP):
-        branch_hit = any(b and (b in info.branch or info.branch in b) for b in branches)
+        branch_hit = any(b and b in info.branch for b in branches)
         ver_hit = any(v and v in info.yl_device_ver for v in yl_versions)
         if branch_hit and (not yl_versions or ver_hit):
-            return mapping
-        if branch_hit and best is None:
-            best = mapping
+            matches.append(mapping)
         token_hit = bool(local_tokens) and all(token and token in tokens_text for token in local_tokens)
-        if token_hit and best is None:
-            best = mapping
-    if best:
-        return best
+        if branch_hit or token_hit:
+            candidates.append(mapping)
+    if matches:
+        identities = {(tuple(m.zentao_names), tuple(m.product_names), m.project_id, m.product_id, m.status, m.verified) for m in matches}
+        if len(identities) == 1:
+            return matches[0]
+        return Mapping([], [], "", "", "", "Multiple project-map matches; confirm the exact product.", "needs-confirmation")
+    if candidates:
+        return replace(candidates[0], status="needs-confirmation", note="Candidate only: branch/version constraints were not fully matched.")
     return Mapping([], [], "", "", "", "No confirmed project-map match.", "unconfirmed")
 
 
 def product_family(info: RepoInfo) -> str:
     text = " ".join([info.name, info.branch, info.yl_device_name, info.yl_device_ver, info.yl_hw_ver]).upper()
     device = info.yl_device_name if info.yl_device_name != "不可用" else ""
+    if "C10" in text and "TW10" in text:
+        return "C10/TW10"
     if device:
         return device
     return "360x"
@@ -208,6 +157,9 @@ def product_family(info: RepoInfo) -> str:
 def protocol_profile(info: RepoInfo) -> tuple[str, str]:
     raw = " ".join([info.name, info.branch, info.yl_device_name, info.yl_device_ver, info.yl_hw_ver])
     text = raw.lower()
+    identity_text = " ".join(
+        [info.branch, info.yl_device_name, info.yl_device_ver, info.yl_hw_ver]
+    ).lower()
     family = product_family(info)
 
     if "3603" in text and "app" in text:
@@ -215,7 +167,7 @@ def protocol_profile(info: RepoInfo) -> tuple[str, str]:
 
     if "lz" in text or "乐智" in raw or "电信" in raw:
         return f"{family} 电信乐智协议", "电信乐智协议 > 平台协议 > 公共固件逻辑"
-    if "app" in text and "xcx" not in text:
+    if "app" in identity_text:
         return f"{family} APP协议", "APP协议 > 平台协议 > 公共固件逻辑"
 
     if "物卡" in raw or "wk" in text:
@@ -232,21 +184,21 @@ def build_command(info: RepoInfo) -> tuple[str, str]:
     if "3603" in text or "craneg" in text:
         return (
             "make craneg_modem_watch TARGET_OS=THREADX PS_MODE=LTEGSM CHIP_ID=CRANEG",
-            "用户确认过的 3603 全量构建命令。",
+            "Built-in 3603 candidate; verify against the project-confirmed build profile before execution.",
         )
     if "lz" in text or "乐智" in text or "电信" in text:
         return (
             "make craneg_modem_watch TARGET_OS=ALIOS PS_MODE=LITE_LTEONLY CHIP_ID=CRANEL",
-            "用户确认过的 3602 默认构建命令；如具体分支验证为 THREADX，以本项目 variant.md 更新为准。",
+            "Built-in 3602 candidate; a project-confirmed THREADX profile takes precedence.",
         )
-    if "app" in text and "3602" in text:
+    if "app" in text and "lt52" in text:
         return (
             "make craneg_modem_watch TARGET_OS=THREADX PS_MODE=LITE_LTEONLY CHIP_ID=CRANEL",
-            "通用 3602 APP 构建候选；实际参数以项目本地 build.md 为准。",
+            "Built-in LT52 APP candidate; verify against the project-confirmed build profile before execution.",
         )
     return (
         "make craneg_modem_watch TARGET_OS=ALIOS PS_MODE=LITE_LTEONLY CHIP_ID=CRANEL",
-        "通用 3602 默认构建候选；产品例外只记录在项目本地 build.md。",
+        "Built-in 3602 candidate; LT52 APP defaults to THREADX. Use the project-confirmed build profile.",
     )
 
 
@@ -289,12 +241,17 @@ def render_files(info: RepoInfo) -> dict[str, str]:
     build, build_source = build_command(info)
     chip_id, target_os, ps_mode = build_identity(build)
     verified_at = datetime.now().astimezone().isoformat(timespec="seconds")
-    zentao_name = mapping.zentao_names[0] if mapping.zentao_names else "未确认"
-    zentao_product_name = mapping.product_names[0] if mapping.product_names else zentao_name
+    names = list(dict.fromkeys(mapping.zentao_names))
+    products = list(dict.fromkeys(mapping.product_names))
+    zentao_name = names[0] if len(names) == 1 else "未确认"
+    zentao_product_name = products[0] if len(products) == 1 else (zentao_name if not products else "未确认")
     project_id = mapping.project_id or "未确认"
     product_id = mapping.product_id or "未确认"
     verified = mapping.verified or "未确认"
-    mapping_status = "confirmed" if mapping.project_id and mapping.status != "unconfirmed" else "needs-confirmation"
+    verified_value = mapping.verified.lower()
+    legacy_verified = verified_value in {"true", "yes", "confirmed"} or bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", verified_value))
+    explicitly_confirmed = mapping.status == "confirmed" or (not mapping.status and legacy_verified)
+    mapping_status = "confirmed" if (mapping.project_id and explicitly_confirmed and len(names) == 1 and len(products) <= 1 and zentao_product_name != "未确认") else "needs-confirmation"
     aliases = "\n".join(f"- `{value}`" for value in memory_aliases(info)) or "- 未确认"
     protocol_links = ""
 
@@ -308,12 +265,12 @@ def render_files(info: RepoInfo) -> dict[str, str]:
 
 ## Context Loading
 
-1. For list-only “抓bug / 当前bug” requests, check whether `AGENTS.md` and `.codex-project/{{index,zentao,build,protocol,variant,device,memory}}.md` exist. If they do, run the `zentao-bug-triage` fast fetch immediately and validate afterward; do not pre-refresh for commit or dirty changes. If any are missing, initialize first.
-2. For other work, read `.codex-project/index.md` first.
-3. If `.codex-project/local.md` exists and the task needs project-specific tools or constraints, read it next.
-4. Read `.codex-project/variant.md` before bug investigation/fixing, protocol, build, flash, release, or Zentao writes.
-5. If the fingerprint is stale, refresh it with `asr3601-project-onboard` before those actions.
-6. Read only the task-specific context linked by the index.
+1. Use `.codex-project/index.md` and only the context required by its matching route. Reuse the route already established for the task. Read `.codex-project/local.md` only for relevant project-specific tools or constraints.
+2. For ordinary read-only source questions, go to live source. Load variant fields only when the answer depends on them; do not run a full context refresh.
+3. For an authorized source edit, capture branch, HEAD, and dirty state once, or reuse that current task snapshot. Refresh identity only when the operation needs missing or stale facts.
+4. For “抓bug / 当前bug”, use the `zentao-bug-triage` launcher directly. It owns missing-context initialization and fetch validation.
+5. For build, flash, release, and Zentao operations, use the owning controller and its required current identity. Do not duplicate checks that controller already performs. Formal release, including `快速出版本`, uses the direct owner-controller path without external preflight or post-success checks.
+6. Keep `.codex-project/variant.md` as the persistent identity source. Reuse a task snapshot across stages; refresh after an unexpected checkout/identity change when the next operation needs it. A controller's own authorized commit can update expected HEAD without full onboarding.
 
 ## Project Guardrails
 
@@ -321,92 +278,96 @@ def render_files(info: RepoInfo) -> dict[str, str]:
 - Do not infer protocol, customer variant, build parameters, Zentao mapping, or device identity from the folder name alone.
 - Do not select a flash target by COM number alone; confirm chip, artifact, USB identity, and probe result.
 - Keep reusable procedures in global Skills and current checkout facts in `.codex-project/`.
-- Store cross-project reusable fixes in the Obsidian `fix-patterns/` memory only after verification.
+- Record completed behavior fixes through `obsidian-fix-pattern-memory` once; static/build evidence is not device, platform, or QA verification.
 """
 
     index = f"""# {info.name} Codex Project Index
 
 Current branch, commit, dirty state, product identity, protocol, build parameters, and Zentao IDs live only in `variant.md`.
 
-## 默认路由
+## Task Routes
 
-| 请求 | 使用 |
+| Request | Owner/context |
 |---|---|
 | 抓 bug / 当前 bug / 禅道 | `zentao-bug-triage` + `.codex-project/zentao.md` |
-| 修 bug / 是否存在 / 当前分支实现 | `asr3601-lvgl-firmware-triage` |
+| 修 bug / 是否存在 / 当前分支实现 / screenshots or repro evidence | `asr3601-lvgl-firmware-triage` |
+| 移植 / source-target adaptation / ordered integration | `asr3601-cross-branch-porting` |
+| Explicit multi-stage or ordered multi-Bug delivery | `asr360x-bug-delivery-orchestrator` |
 | 查协议 / 是否符合协议 | `asr3601-protocol-branch-matrix` + `.codex-project/protocol.md` |
 | CATStudio / 日志 | `catstudio-log-extractor` |
-| 验证 / 收工 / 解决说明 / 验证债务 | `asr3601-fix-closeout-reporter` |
-| 编译 / 刷机 | `asr3602-local-build-flash` + `.codex-project/build.md` + `.codex-project/device.md` |
-| 正式发布 / 上传 | `.codex-project/local.md` 指定的私有发布流程 |
+| Explicit closeout / re-verification | `asr3601-lvgl-firmware-triage` closeout mode; reuse the existing result |
+| Validation debt / pending device checks / Campaign | `obsidian-fix-pattern-memory` reporting mode |
+| 编译 / build only | `asr3602-local-build-flash` + `.codex-project/build.md` |
+| 刷机 / build and flash | `asr3602-local-build-flash`; load `.codex-project/device.md` for physical-device work |
+| 出 FOTA / 重新出 FOTA / FOTA 测试双包 | `asr3602-fota-pair-release` directly; its two builds supply build evidence |
+| 正式发布 / 上传 / 快速出版本 | `akq-firmware-release`; one direct controller call |
 | 变体确认 / 客户能力边界 | `.codex-project/variant.md` |
 | 类似问题/修复记忆 | `.codex-project/memory.md` |
 
-## 项目专属扩展
+## Project-Owned Context
 
-如果 `.codex-project/local.md` 存在，按需读取其中的项目专属工具、命令或约束。该文件由项目自行维护，project-onboard 不创建也不覆盖。
+Read `.codex-project/local.md` only when relevant. The project owns it; onboarding never creates or overwrites it.
 
-## 注意
+## Scope
 
-项目上下文文件是本机 Codex 辅助文件，不参与固件提交。不要在本文件复制 `variant.md` 的动态字段。
+These local context files are excluded from firmware commits. Keep dynamic fields in `variant.md`, and specialist procedures in their Skills.
 """
 
     zentao = f"""# Zentao Context
 
-当前映射状态、项目名、产品名、候选名称、project_id、product_id 和核验信息只记录在 `variant.md`。
+Current mapping status, project/product names, candidates, IDs, and evidence live only in `variant.md`.
 
-## 映射来源
+## Mapping Source
 
-- 来源：`{PROJECT_MAP_SOURCE}`
+- Source: `{PROJECT_MAP_SOURCE}`
 
-## 抓取规则
+## Operations
 
-- 用户说“抓 bug / 当前 bug / 去禅道抓 bug”时，直接运行快速入口；它先按文件存在性判断是否初始化，抓取完成后再校验实时仓库、版本、项目和附件。
-- 已初始化时不因 commit 或 dirty 变化在抓取前刷新；未初始化时才先运行 project-onboard。抓取快照不一致时刷新并重抓一次。
-- 不优先使用浏览器、Chrome 或 Computer Use；只有脚本失败、登录失效、页面结构变化或用户明确要求看网页时才兜底。
-- 如果 `variant.md` 的映射状态是 `needs-confirmation`，抓项目专属 bug 前先让用户确认禅道项目名和项目 ID。
+- Use `zentao-bug-triage` for read-only list/detail/reconciliation requests. Its launcher owns initialization and snapshot validation; do not repeat those steps outside it.
+- Use `zentao-bug-resolver` for authorized resolution. It must read the confirmed product from `variant.md` and match the detail-page product exactly before writing.
+- Missing or ambiguous mapping requires the missing project/product facts; do not guess from a similar name. Preserve an already supplied exact authorization.
+- Use browser fallback only when the script fails or the user requests the page.
 
-## 常用命令
+## List Entry
 
 ```powershell
 python -X utf8 \"{FAST_ZENTAO_SCRIPT}\" --repo .
-$env:NODE_PATH=\"$env:USERPROFILE\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules;$env:USERPROFILE\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\.pnpm\\node_modules\"
-node \"{PLUGIN_ZENTAO_SCRIPT}\" --repo . --bug-status unresolved --detail-limit 0 --no-download-attachments
 ```
 """
 
     build_md = """# Build Context
 
-当前构建命令、构建来源、目标、CHIP_ID、TARGET_OS 和 PS_MODE 只记录在 `variant.md`。
+Current build command, source, target, CHIP_ID, TARGET_OS, and PS_MODE live in `variant.md` and the existing project build profile.
 
-## 使用规则
+## Validation And Controllers
 
-- 修复后优先跑最小验证；涉及共用逻辑、协议、UI 状态机或出版本前，再跑全量构建。
-- 全量构建前先执行 `git status --short`，不要忽略未跟踪源码文件。
-- 构建前重新核对 `variant.md` 与当前仓库；指纹过期时先刷新项目上下文。
-- 如果已记录命令在本项目失败，修正证据来源并重新生成 `variant.md`，不要把当前分支参数写回本文件或全局 Skill。
+- For a source fix, run the narrowest useful documented validation. Expand for shared behavior or unresolved evidence, not merely to repeat a passed check.
+- When formal/FOTA delivery immediately follows, let its controller provide full build evidence. FOTA pairs build test then formal; do not add a third standalone build.
+- The selected controller owns profile, Git/dirty, freshness, package, and device checks. Supply the confirmed command and consume its result; do not repeat those checks outside it.
+- Preserve required untracked source/resources and unrelated changes. Resolve a command/profile mismatch from current project evidence; keep dynamic parameters out of this file and global Skills.
 """
 
     protocol_md = f"""# Protocol Context
 
-当前产品族、客户/产品变体、协议、协议优先级和 `yl_*` 版本只记录在 `variant.md`。
+Current product, variant, protocol classification, and `yl_*` identity live in `variant.md`.
 
-## 协议资料入口
+## Protocol Sources
 
 - [协议资料索引]({(PROTOCOL_ROOT / 'index.md').as_posix()})
 - [协议与分支矩阵]({(PROTOCOL_ROOT / 'matrix.md').as_posix()})
 
-## 使用规则
+## Evidence
 
-- 判断“是否符合协议”时，先走 `asr3601-protocol-branch-matrix`。
-- 只读相关协议文件，不默认读取整个协议库。
-- 结论要区分：固件未发送、固件字段不一致、平台未识别、当前分支不支持、产品/客户/平台变体差异。
-- `variant.md` 记录的当前项目协议优先级高于全局泛化判断。
+- Use `asr3601-protocol-branch-matrix` for protocol conformance or responsibility questions; read only the relevant protocol version and current source path.
+- Generated protocol classification is an identity-based search hint, not proof of active protocol support. Confirm the active parser/formatter and applicable document before assigning protocol responsibility.
+- Distinguish absent firmware reports, field mismatch, platform parsing, unsupported branches, product differences, and missing runtime evidence.
 """
 
     repo_id = repository_id(info)
     variant_id = identity_hash(zentao_product_name, 12) if zentao_product_name not in {"", "未确认"} else ""
-    target_id = identity_hash("|".join([repo_id, info.branch, info.yl_device_ver, variant_id]), 16)
+    # Match canonical memory and snapshot reconciliation; branch/version are case-sensitive.
+    target_source = "|".join(" ".join(value.split()) for value in [repo_id, info.branch, info.yl_device_ver, variant_id])
+    target_id = hashlib.sha256(target_source.encode("utf-8")).hexdigest()[:16]
 
     variant_md = f"""# ASR Variant Fingerprint
 
@@ -453,40 +414,39 @@ node \"{PLUGIN_ZENTAO_SCRIPT}\" --repo . --bug-status unresolved --detail-limit 
 
 ## 使用规则
 
-- 每次修复、移植、验证、构建、发布或禅道操作前重新核对 branch、commit、dirty 和 `yl_device_ver`。
-- 客户/产品变体不等于协议；协议只按 APP、小程序、乐智及明确的平台路径判断。
-- 指纹与当前仓库不一致时，先重新运行 project-onboard，不沿用旧构建或禅道映射。
+- Reuse the current task snapshot. A new identity-dependent operation must not use facts invalidated by a checkout or identity change; let its owner refresh them.
+- Product names are not protocol evidence. Verify the generated classification against active code and the applicable protocol document.
+- Build/release/Zentao controllers own their current-state gates. Do not repeat a full onboarding pass between unchanged stages or outside a direct release controller.
 """
 
     device_md = """# Device Target Context
 
-当前项目、分支、预期芯片参数和构建目标只记录在 `variant.md`。
+Current project, branch, expected chip, and build target live in `variant.md`.
 
-## 稳定识别规则
+## Device Selection
 
-- 预期下载设备族：`ASR Modem / ASR Serial Download / ASR DIAG`
-- 常见 USB 标识：`VID_2ECC`（只作候选，必须以实时枚举和芯片探测为准）
-- 固定 COM：`不记录`
+- Expected family: `ASR Modem / ASR Serial Download / ASR DIAG`.
+- `VID_2ECC` identifies a candidate only; live USB enumeration and chip probes decide the target.
+- Do not persist a COM number as device identity.
 
-## 刷机门槛
+## Flash Boundary
 
-- 刷机前同时核对项目指纹、固件产物、CHIP_ID、USB VID/PID/设备名称和探测结果。
-- COM 号不是设备身份，不能因为上次使用过同一 COM 就直接刷写。
-- 检测到 ESP32、蓝牙串口、未知 USB 串口或芯片不一致时立即停止。
-- 多台嵌入式设备同时连接时，先输出候选设备表，再选择唯一匹配目标。
+- Immediately before flashing, the controller revalidates the package, chip, physical USB identity, and probe result. A remembered port or earlier task snapshot cannot replace this check.
+- Stop on an ESP32, Bluetooth/unknown serial target, or chip mismatch. With multiple devices, identify the one matching physical target before flashing.
+- Build-only work does not load or probe devices.
 """
 
     memory_md = f"""# Project Memory Context
 
-- 记忆根目录：`{(Path.home() / 'Documents' / 'Obsidian' / 'CodexVault' / 'Codex' / 'fix-patterns')}`
+- Memory root: `{(Path.home() / 'Documents' / 'Obsidian' / 'CodexVault' / 'Codex' / 'fix-patterns')}`
 
-当前项目、分支、产品族、协议和搜索别名只记录在 `variant.md`。
+Current project identity and search aliases live in `variant.md`.
 
-## 使用规则
+## Lookup And Recording
 
-- 仅在类似问题、回归、跨分支、明确日志关键词或用户要求读取记忆时，使用 `variant.md` 的搜索别名。
-- 默认只读最相关的 1-3 条 `fix-patterns`，不扫描整个 vault。
-- 已验证修复可提升记忆可信度；Bug 复测激活时必须把旧记忆标记为待复核。
+- Search narrowly for similar/regression/cross-branch issues, clear error signatures, or explicit memory requests; read at most three relevant notes. Ordinary fixes do not require a prior memory lookup.
+- After a behavior fix, use `obsidian-fix-pattern-memory` once and pass its exact note/target in the result. Downstream stages reuse it and record only new evidence events.
+- Static/build evidence remains working evidence. A reactivated Bug updates only the matching target; it does not invalidate unrelated versions or prove a common root cause.
 """
 
     return {
@@ -513,6 +473,24 @@ def variant_fields(text: str) -> dict[str, str]:
 def comparable_variant(text: str) -> str:
     """Ignore only generation time; every other variant fact is freshness-significant."""
     return re.sub(r"^- verified_at：`[^`]*`\s*\n", "", text, count=1, flags=re.M).strip()
+
+
+def task_snapshot_id(info: RepoInfo, files: dict[str, str]) -> str:
+    """Return a compact receipt for one validated task context."""
+    expected = variant_fields(files[".codex-project/variant.md"])
+    dirty_id = identity_hash(info.dirty, 12)
+    parts = [
+        repository_id(info),
+        info.branch,
+        info.commit,
+        dirty_id,
+        info.yl_device_name,
+        info.yl_device_ver,
+        info.yl_hw_ver,
+        expected.get("variant_id", ""),
+        expected.get("target_id", ""),
+    ]
+    return identity_hash("|".join(parts), 16)
 
 
 def check_context(info: RepoInfo, files: dict[str, str]) -> int:
@@ -546,6 +524,7 @@ def check_context(info: RepoInfo, files: dict[str, str]) -> int:
         print("status=stale")
         return 2
     print("status=current")
+    print(f"snapshot_id={task_snapshot_id(info, files)}")
     return 0
 
 

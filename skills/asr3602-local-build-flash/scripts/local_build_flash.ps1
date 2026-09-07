@@ -4,6 +4,8 @@ param(
     [string]$Package,
     [string]$Port,
     [string]$Target = "craneg_modem_watch",
+    [string]$BuildProfileAdapter,
+    [string]$ManifestOut,
     [string]$Adownload,
     [switch]$NoBuild,
     [switch]$NoFlash,
@@ -14,6 +16,12 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+$buildRuntime = Join-Path $env:USERPROFILE ".codex\scripts\asr360x_build_runtime.ps1"
+if (-not (Test-Path -LiteralPath $buildRuntime -PathType Leaf)) {
+    throw "Shared ASR360x build runtime is missing: $buildRuntime"
+}
+. $buildRuntime
 
 function Resolve-ExistingPath {
     param([string]$PathValue, [string]$BasePath)
@@ -77,6 +85,12 @@ function Get-Sha256Hex {
     }
 }
 
+function Normalize-CommandText {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return "" }
+    return (($Value -split '\s+') -join ' ').Trim()
+}
+
 function Resolve-Adownload {
     param([string]$RepoPath, [string]$ExplicitPath)
     if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
@@ -114,14 +128,12 @@ function Select-FirmwarePackage {
     $productDir = Join-Path $RepoPath ("out\product\{0}" -f $TargetName)
     if (-not [string]::IsNullOrWhiteSpace($ExplicitPackage)) {
         $resolvedPackage = Resolve-ExistingPath -PathValue $ExplicitPackage -BasePath $RepoPath
-        $separator = [System.IO.Path]::DirectorySeparatorChar
-        $pathComparison = if ($separator -eq '\') { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
-        $productRoot = [System.IO.Path]::GetFullPath($productDir).TrimEnd($separator) + $separator
-        if (-not [System.IO.Path]::GetFullPath($resolvedPackage).StartsWith($productRoot, $pathComparison)) {
+        $productRoot = [System.IO.Path]::GetFullPath($productDir).TrimEnd('\') + '\'
+        if (-not [System.IO.Path]::GetFullPath($resolvedPackage).StartsWith($productRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "Normal local flashing requires the package under the selected project target: $productDir"
         }
-        if ([System.IO.Path]::GetExtension($resolvedPackage) -ne ".zip" -or [System.IO.Path]::GetFileName($resolvedPackage) -match "(?i)(source|dump)") {
-            throw "Normal local flashing rejects source/dump packages: $resolvedPackage"
+        if ([System.IO.Path]::GetExtension($resolvedPackage) -ne ".zip" -or [System.IO.Path]::GetFileName($resolvedPackage) -match "(?i)(source|dump|acceptance)") {
+            throw "Normal local flashing rejects source/dump/acceptance packages: $resolvedPackage"
         }
         return $resolvedPackage
     }
@@ -132,7 +144,7 @@ function Select-FirmwarePackage {
 
     $packages = @(
         Get-ChildItem -LiteralPath $productDir -Recurse -File -Filter "*.zip" |
-            Where-Object { $_.Name -notmatch "(?i)(source|dump)" } |
+            Where-Object { $_.Name -notmatch "(?i)(source|dump|acceptance)" } |
             Sort-Object LastWriteTime -Descending
     )
 
@@ -151,6 +163,37 @@ function Select-FirmwarePackage {
 $repoPath = Resolve-ExistingPath -PathValue $Repo -BasePath (Get-Location).Path
 Write-Host "Repo: $repoPath"
 
+if ([string]::IsNullOrWhiteSpace($BuildProfileAdapter)) {
+    $BuildProfileAdapter = Join-Path $repoPath ".codex-project\asr3602-build-profile.json"
+}
+$BuildProfileAdapter = Resolve-ExistingPath -PathValue $BuildProfileAdapter -BasePath $repoPath
+$profileScript = Join-Path $HOME ".codex\scripts\asr3602_build_profile.py"
+if (-not (Test-Path -LiteralPath $profileScript -PathType Leaf)) {
+    throw "Shared ASR3602 build profile script not found: $profileScript"
+}
+$profileEvidence = Join-Path $env:TEMP ("asr3602-normal-test-preflight-{0}.json" -f ([guid]::NewGuid().ToString("N")))
+try {
+    & python -X utf8 $profileScript preflight --profile normal-test --repo $repoPath --adapter $BuildProfileAdapter --json-out $profileEvidence
+    if ($LASTEXITCODE -ne 0) { throw "normal-test build profile preflight blocked the operation" }
+    $profileResult = Get-Content -LiteralPath $profileEvidence -Raw -Encoding UTF8 | ConvertFrom-Json
+} finally {
+    if (Test-Path -LiteralPath $profileEvidence) { Remove-Item -LiteralPath $profileEvidence -Force }
+}
+$adapter = Get-Content -LiteralPath $BuildProfileAdapter -Raw -Encoding UTF8 | ConvertFrom-Json
+$adapterSha256 = Get-Sha256Hex -PathValue $BuildProfileAdapter
+if ($Target -ne [string]$adapter.buildTarget) {
+    throw "Target differs from the project build profile: requested=$Target adapter=$($adapter.buildTarget)"
+}
+$adapterBuildCommand = [string]$adapter.build.command
+if ([string]::IsNullOrWhiteSpace($BuildCommand)) {
+    $BuildCommand = $adapterBuildCommand
+} elseif ((Normalize-CommandText $BuildCommand) -ne (Normalize-CommandText $adapterBuildCommand)) {
+    throw "BuildCommand differs from the project build profile: $adapterBuildCommand"
+}
+Write-Host "Build profile: normal-test"
+Write-Host "Build profile adapter: $BuildProfileAdapter"
+Write-Host "Build profile adapter SHA256: $adapterSha256"
+
 if ($CleanTargetOutput) {
     if ($NoBuild) {
         throw "CleanTargetOutput cannot be combined with NoBuild"
@@ -158,11 +201,9 @@ if ($CleanTargetOutput) {
     if ($Target -notmatch '^[A-Za-z0-9_.-]+$') {
         throw "Target contains unsupported characters: $Target"
     }
-    $separator = [System.IO.Path]::DirectorySeparatorChar
-    $pathComparison = if ($separator -eq '\') { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
-    $productRoot = [System.IO.Path]::GetFullPath((Join-Path $repoPath "out\product")).TrimEnd($separator) + $separator
-    $targetOutput = [System.IO.Path]::GetFullPath((Join-Path $productRoot $Target)).TrimEnd($separator)
-    if (-not $targetOutput.StartsWith($productRoot, $pathComparison) -or
+    $productRoot = [System.IO.Path]::GetFullPath((Join-Path $repoPath "out\product")).TrimEnd('\') + '\'
+    $targetOutput = [System.IO.Path]::GetFullPath((Join-Path $productRoot $Target)).TrimEnd('\')
+    if (-not $targetOutput.StartsWith($productRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
         [System.IO.Path]::GetFileName($targetOutput) -ne $Target) {
         throw "Refusing to clean an output path outside the selected target: $targetOutput"
     }
@@ -188,10 +229,8 @@ if ($status) {
 
 $buildStartedAt = Get-Date
 if (-not $NoBuild) {
-    if ([string]::IsNullOrWhiteSpace($BuildCommand)) {
-        throw "BuildCommand is required unless -NoBuild is used. Read .codex-project\build.md or ask the user for the exact command."
-    }
-    Invoke-BuildCommand -CommandText $BuildCommand -WorkingDirectory $repoPath
+    $effectiveBuildCommand = Add-AsrMsysBuildPathsToCommand -CommandText $BuildCommand -RepoPath $repoPath
+    Invoke-BuildCommand -CommandText $effectiveBuildCommand -WorkingDirectory $repoPath
 } else {
     Write-Host "Build skipped by -NoBuild."
 }
@@ -218,15 +257,59 @@ Write-Host ("Artifact: {0}" -f ([ordered]@{
     commit = $commit
     target = $Target
     buildCommand = $BuildCommand
+    buildProfile = "normal-test"
+    buildProfileAdapter = $BuildProfileAdapter
+    buildProfileAdapterSha256 = $adapterSha256
 } | ConvertTo-Json -Compress))
+
+if ([string]::IsNullOrWhiteSpace($ManifestOut)) {
+    $ManifestOut = Join-Path ([System.IO.Path]::GetDirectoryName($packagePath)) "normal-test-manifest.json"
+} elseif (-not [System.IO.Path]::IsPathRooted($ManifestOut)) {
+    $ManifestOut = Join-Path $repoPath $ManifestOut
+}
+$normalManifest = [ordered]@{
+    schemaVersion = 1
+    kind = "asr3602-normal-test"
+    build_profile = "normal-test"
+    generatedAt = (Get-Date).ToString("o")
+    adapter = [ordered]@{ path = $BuildProfileAdapter; sha256 = $adapterSha256; id = [string]$adapter.adapterId }
+    source = [ordered]@{
+        repo = $repoPath
+        branch = $branch
+        head = (Get-GitLine -RepoPath $repoPath -GitArgs @("rev-parse", "HEAD"))
+        dirty = @($status -split "`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        dirtySummarySha256 = [string]$profileResult.source.dirtySummarySha256
+    }
+    build = [ordered]@{ command = $BuildCommand; target = $Target; chipId = [string]$adapter.chipId; targetOs = [string]$adapter.targetOs; psMode = [string]$adapter.psMode }
+    artifact = [ordered]@{ path = $packagePath; sha256 = $packageSha256; sizeBytes = $packageItem.Length }
+}
+if ($DryRun) {
+    Write-Host "Normal-test manifest planned: $ManifestOut"
+} else {
+    $manifestParent = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($ManifestOut))
+    if (-not (Test-Path -LiteralPath $manifestParent)) { New-Item -ItemType Directory -Path $manifestParent -Force | Out-Null }
+    $manifestTemp = "$ManifestOut.partial-$PID"
+    [System.IO.File]::WriteAllText($manifestTemp, (($normalManifest | ConvertTo-Json -Depth 8) + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $manifestTemp -Destination $ManifestOut -Force
+    Write-Host "Normal-test manifest: $ManifestOut"
+}
 
 if ($NoFlash) {
     Write-Host "Flash skipped by -NoFlash."
     exit 0
 }
 
+if ((Get-Sha256Hex -PathValue $BuildProfileAdapter) -ne $adapterSha256) {
+    throw "Build profile adapter changed after build; flashing blocked"
+}
+if ((Get-Sha256Hex -PathValue $packagePath) -ne $packageSha256) {
+    throw "Firmware package changed after manifest creation; flashing blocked"
+}
+& python -X utf8 $profileScript preflight --profile normal-test --repo $repoPath --adapter $BuildProfileAdapter | Out-Host
+if ($LASTEXITCODE -ne 0) { throw "normal-test preflight changed after build; flashing blocked" }
+
 $expectedChip = ""
-if ($BuildCommand -match '(?i)\bCHIP_ID=([^\s]+)') { $expectedChip = $Matches[1] }
+$expectedChip = [string]$adapter.chipId
 $preflight = Join-Path $PSScriptRoot "embedded_target_preflight.ps1"
 if (-not (Test-Path -LiteralPath $preflight)) { throw "Embedded target preflight not found: $preflight" }
 $preflightArgs = @("-ExpectedFamily", "ASR", "-ExpectedChip", $expectedChip, "-ProjectDir", $repoPath, "-Package", $packagePath)

@@ -5,20 +5,36 @@
     {
       "source": "AGENTS.md",
       "destination": "AGENTS.md"
+    },
+    {
+      "source": "scripts/asr3602_build_profile.py",
+      "destination": "runtime/asr3602_build_profile.py"
+    },
+    {
+      "source": "scripts/asr360x_build_runtime.ps1",
+      "destination": "runtime/asr360x_build_runtime.ps1"
+    },
+    {
+      "source": "scripts/test_asr3602_build_profile.py",
+      "destination": "runtime/test_asr3602_build_profile.py"
+    },
+    {
+      "source": "scripts/test_asr360x_build_runtime.ps1",
+      "destination": "runtime/test_asr360x_build_runtime.ps1"
     }
   ],
-  "skills": [
+  "retired_skills": [
     "aa-skill-router",
+    "asr3601-fix-closeout-reporter"
+  ],
+  "skills": [
     "asr3601-cross-branch-porting",
-    "asr3601-fix-closeout-reporter",
     "asr3601-lvgl-firmware-triage",
     "asr3601-project-onboard",
     "asr3601-protocol-branch-matrix",
     "asr3602-local-build-flash",
     "asr360x-bug-delivery-orchestrator",
     "catstudio-log-extractor",
-    "codex-ccswitch-mobile",
-    "codex-clash-proxy",
     "obsidian-fix-pattern-memory",
     "skill-usage-tracker",
     "zentao-bug-resolver",
