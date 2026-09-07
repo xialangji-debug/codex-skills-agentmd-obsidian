@@ -95,7 +95,7 @@ class BuildProfileTests(unittest.TestCase):
 
     def test_release_requires_clean_verified_adapter(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             adapter = self.make_repo(root)
             result = PROFILE.preflight("release", adapter, root)
             self.assertEqual("PASSED", result["status"])
@@ -112,7 +112,7 @@ class BuildProfileTests(unittest.TestCase):
         )
         for target_os, ps_mode, chip_id in identities:
             with self.subTest(identity=(target_os, ps_mode, chip_id)), tempfile.TemporaryDirectory() as temp:
-                root = Path(temp)
+                root = Path(temp).resolve()
                 adapter = self.make_repo(
                     root,
                     support="ASR360X_BUILD_VERIFIED",
@@ -125,7 +125,7 @@ class BuildProfileTests(unittest.TestCase):
 
     def test_release_resume_allows_only_expected_version_time_change(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             adapter = self.make_repo(root)
             yl_h = root / "gui" / "lv_watch" / "lv_apps" / "yl" / "yl.h"
             yl_h.write_bytes(
@@ -144,7 +144,7 @@ class BuildProfileTests(unittest.TestCase):
 
     def test_release_resume_rejects_other_file_or_other_yl_change(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             adapter = self.make_repo(root)
             yl_h = root / "gui" / "lv_watch" / "lv_apps" / "yl" / "yl.h"
             yl_h.write_bytes(
@@ -172,7 +172,7 @@ class BuildProfileTests(unittest.TestCase):
 
     def test_release_allows_charging_value_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             adapter = self.make_repo(root, release_charge=1)
             data = json.loads(adapter.read_text(encoding="utf-8"))
             data["chargingAnimation"]["releaseValue"] = 0
@@ -186,7 +186,7 @@ class BuildProfileTests(unittest.TestCase):
 
     def test_normal_test_records_dirty_but_rejects_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             adapter = self.make_repo(root, support="CANDIDATE")
             (root / "dirty.txt").write_text("dirty", encoding="ascii")
             with self.assertRaisesRegex(PROFILE.ProfileError, "CANDIDATE"):
@@ -196,7 +196,7 @@ class BuildProfileTests(unittest.TestCase):
 
     def test_dump_profile_declares_exact_temporary_policy(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             adapter = self.make_repo(root)
             result = PROFILE.preflight("dump-test", adapter, root)
             self.assertEqual("remove-exactly-one", result["temporaryChanges"]["watchdogEntry"]["action"])
@@ -204,7 +204,7 @@ class BuildProfileTests(unittest.TestCase):
 
     def test_duplicate_watchdog_entry_is_blocked(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             adapter = self.make_repo(root)
             entry = {"id": "CDF", "image": "EEHandlerConfig.nvm"}
             (root / "config" / "watchdog.json").write_text(json.dumps([entry, entry]), encoding="utf-8")
@@ -213,7 +213,7 @@ class BuildProfileTests(unittest.TestCase):
 
     def test_wrong_charge_value_and_dump_marker_are_blocked(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             adapter = self.make_repo(root, release_charge=1)
             (root / "config" / "charge.h").write_text("#define USE_LV_CHARGING_BATTERY 0\n", encoding="ascii")
             with self.assertRaisesRegex(PROFILE.ProfileError, "charging configuration mismatch"):
@@ -225,7 +225,7 @@ class BuildProfileTests(unittest.TestCase):
 
     def test_adapter_and_variant_mismatch_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             adapter = self.make_repo(root)
             data = json.loads(adapter.read_text(encoding="utf-8"))
             data["chipId"] = "CRANEG"

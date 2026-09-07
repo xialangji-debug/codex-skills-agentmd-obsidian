@@ -160,8 +160,11 @@ def run_checks() -> int:
 
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="codex-public-checks-") as temporary:
-        root = Path(temporary)
+        root = Path(temporary).resolve()
+        scratch = root / "tmp"
+        scratch.mkdir()
         CHECK_ENV.update({"HOME": str(root), "USERPROFILE": str(root), "CODEX_HOME": str(root / ".codex")})
+        CHECK_ENV.update({"TMP": str(scratch), "TEMP": str(scratch), "TMPDIR": str(scratch)})
         install_smoke_test(root)
         return run_checks()
 

@@ -40,7 +40,7 @@ process.stdout.write(JSON.stringify(resolver.memoryTargetContext(ctx, product)))
 
 class IdentityContractTests(unittest.TestCase):
     def target(self, root: Path, branch: str, version: str, product: str = "Product A") -> dict:
-        # Match read_repo_info: Windows temporary paths can use 8.3 aliases.
+        # Match gather(): Windows temporary paths can use 8.3 aliases.
         root = root.resolve()
         info = onboard.RepoInfo(root, root.name, branch, "abc1234", "clean", "SAMPLE", version, "ASR3602")
         mapping = onboard.Mapping(["Project A"], [product], "42", "7", "true", "", "confirmed")
