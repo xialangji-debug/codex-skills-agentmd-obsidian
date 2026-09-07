@@ -252,7 +252,11 @@ def set_frontmatter_domains(text: str, domain: str) -> str:
 
 
 def load_active_projects(path: Path) -> list[dict[str, Any]]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    payload = json.loads(text)
     return [item for item in payload.get("projects") or [] if item.get("enabled", True)]
 
 

@@ -254,6 +254,31 @@ class FixMemoryTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 fix_memory.command_upsert(args)
 
+    def test_maintenance_without_private_project_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            registry = root / "absent-projects.json"
+            note = root / "sample.md"
+            state = fix_memory.empty_state("FP-TEST")
+            state["targets"] = [context("target-a", "main", "static_checked", "2026-09-07T10:00:00+08:00")]
+            original = fix_memory.finalize_note(fix_memory.note_template("Sample", "FP-TEST", "none"), state)
+            note.write_text(original, encoding="utf-8")
+            args = argparse.Namespace(root=str(root), active_projects=str(registry), only_domain="all", write=False)
+            self.assertEqual(0, fix_memory.command_validate(args))
+            self.assertEqual(0, fix_memory.command_audit_domains(args))
+            self.assertEqual(("", ""), fix_memory.infer_domain(str(root), "sample-project", registry))
+            self.assertEqual(original, note.read_text(encoding="utf-8"))
+
+    def test_validation_rejects_malformed_project_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            registry = root / "active-projects.json"
+            registry.write_text("{invalid", encoding="utf-8")
+            (root / "sample.md").write_text(fix_memory.note_template("Sample", "FP-TEST", "none"), encoding="utf-8")
+            args = argparse.Namespace(root=str(root), active_projects=str(registry))
+            with self.assertRaises(json.JSONDecodeError):
+                fix_memory.command_validate(args)
+
     def test_domain_audit_writes_only_selected_high_confidence_domain(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
