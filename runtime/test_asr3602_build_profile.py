@@ -104,6 +104,36 @@ class BuildProfileTests(unittest.TestCase):
             with self.assertRaisesRegex(PROFILE.ProfileError, "clean worktree"):
                 PROFILE.preflight("release", adapter, root)
 
+    def test_explicit_dirty_release_preserves_index_and_records_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            adapter = self.make_repo(root)
+            (root / "src/at.c").write_text("int changed;\n", encoding="ascii")
+            (root / "src/new.c").write_text("int added;\n", encoding="ascii")
+            self.run_git(root, "add", "src")
+            before = PROFILE._run_git_bytes(root, "diff", "--cached", "--binary")
+            with self.assertRaises(PROFILE.ProfileError):
+                PROFILE.preflight("release", adapter, root)
+            result = PROFILE.preflight("release", adapter, root, allow_dirty_source=True)
+            self.assertEqual("PASSED", result["status"])
+            self.assertEqual("uncommitted-source", result["source"]["releaseMode"])
+            digest = result["source"]["diffSha256"]
+            self.assertEqual(before, PROFILE._run_git_bytes(root, "diff", "--cached", "--binary"))
+            (root / "src/at.c").write_text("int changed_again;\n", encoding="ascii")
+            result = PROFILE.preflight("release", adapter, root, allow_dirty_source=True)
+            self.assertNotEqual(digest, result["source"]["diffSha256"])
+            (root / "untracked.c").write_text("int x;\n", encoding="ascii")
+            with self.assertRaisesRegex(PROFILE.ProfileError, "untracked"):
+                PROFILE.preflight("release", adapter, root, allow_dirty_source=True)
+
+    def test_dirty_release_still_rejects_dump_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            adapter = self.make_repo(root)
+            (root / "src/at.c").write_text("ASR360X_DUMP_ACCEPTANCE_TEST\n", encoding="ascii")
+            with self.assertRaisesRegex(PROFILE.ProfileError, "DumpTest"):
+                PROFILE.preflight("release", adapter, root, allow_dirty_source=True)
+
     def test_all_confirmed_build_identities_are_accepted(self) -> None:
         identities = (
             ("THREADX", "LTEGSM", "CRANEG"),

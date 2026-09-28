@@ -34,133 +34,43 @@ def run_script(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 with tempfile.TemporaryDirectory(prefix="project-onboard-") as temp:
     repo = Path(temp) / "example_firmware"
-    yl_dir = repo / "gui" / "lv_watch" / "lv_apps" / "yl"
+    yl_dir = repo / "gui/lv_watch/lv_apps/yl"
     yl_dir.mkdir(parents=True)
-    (yl_dir / "yl.h").write_text(
-        '#define yl_device_name "SAMPLE"\n#define yl_device_ver "SAMPLE_3602_TEST"\n#define yl_hw_ver "SAMPLE_3602"\n',
-        encoding="utf-8",
-    )
+    header = yl_dir / "yl.h"
+    header.write_text('#define yl_device_name "SAMPLE"\n#define yl_device_ver "SAMPLE_3602_TEST"\n#define yl_hw_ver "SAMPLE_3602"\n')
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
+    for key, value in (("user.name", "Test"), ("user.email", "test@example.invalid")):
+        subprocess.run(["git", "-C", str(repo), "config", key, value], check=True)
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "base"], check=True)
-    write = run_script(repo, "--write")
-    assert write.returncode == 0, write.stderr or write.stdout
-    local_file = repo / ".codex-project" / "local.md"
-    local_content = "# Project-owned local context\n\nDO-NOT-OVERWRITE\n"
-    local_file.write_text(local_content, encoding="utf-8")
-    force = run_script(repo, "--write", "--force")
-    assert force.returncode == 0, force.stderr or force.stdout
-    assert local_file.read_text(encoding="utf-8") == local_content
-    assert "local.md" not in force.stdout.split("written=", 1)[-1].splitlines()[0]
-    for name in ["variant.md", "device.md", "memory.md"]:
-        assert (repo / ".codex-project" / name).exists()
-    agents = (repo / "AGENTS.md").read_text(encoding="utf-8")
-    index = (repo / ".codex-project" / "index.md").read_text(encoding="utf-8")
-    zentao = (repo / ".codex-project" / "zentao.md").read_text(encoding="utf-8")
-    assert ".codex-project/local.md" in agents
-    assert ".codex-project/local.md" in index
-    assert ".codex\\skills\\zentao-bug-triage" in zentao
-    variant = (repo / ".codex-project" / "variant.md").read_text(encoding="utf-8")
-    assert "branch：`main`" in variant
-    assert "yl_device_ver`：`SAMPLE_3602_TEST`" in variant
-    assert "构建命令：`make craneg_modem_watch" in variant
-    assert "project_id：`" in variant
-    stable_files = [
-        repo / "AGENTS.md",
-        repo / ".codex-project" / "index.md",
-        *[
-            repo / ".codex-project" / name
-            for name in ["zentao.md", "build.md", "protocol.md", "device.md", "memory.md"]
-        ],
-    ]
-    forbidden_values = ["SAMPLE_3602_TEST", "branch：`main`", "make craneg_modem_watch", "project_id：`"]
-    for path in stable_files:
-        text = path.read_text(encoding="utf-8")
-        for value in forbidden_values:
-            assert value not in text, f"{path.name} duplicated dynamic value: {value}"
-    check = run_script(repo, "--check")
-    assert check.returncode == 0, check.stderr or check.stdout
-    snapshot_line = next(line for line in check.stdout.splitlines() if line.startswith("snapshot_id="))
-    snapshot_id = snapshot_line.split("=", 1)[1]
-    assert len(snapshot_id) == 16
-    repeated_check = run_script(repo, "--check")
-    assert f"snapshot_id={snapshot_id}" in repeated_check.stdout
-    yl_file = yl_dir / "yl.h"
-    original_yl = yl_file.read_text(encoding="utf-8")
-    yl_file.write_text(original_yl + "// dirty\n", encoding="utf-8")
-    dirty = run_script(repo, "--check")
-    assert dirty.returncode == 2
-    assert "variant content differs" in dirty.stdout and "status=stale" in dirty.stdout
-    assert "snapshot_id=" not in dirty.stdout
-    yl_file.write_text(original_yl, encoding="utf-8")
-    clean_again = run_script(repo, "--check")
-    assert clean_again.returncode == 0, clean_again.stderr or clean_again.stdout
-    (repo / "tracked.txt").write_text("next\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "next"], check=True)
-    stale = run_script(repo, "--check")
-    assert stale.returncode == 2
-    assert "commit:" in stale.stdout and "status=stale" in stale.stdout
-    refresh = run_script(repo, "--write")
-    assert refresh.returncode == 0, refresh.stderr or refresh.stdout
-    refreshed_check = run_script(repo, "--check")
-    assert refreshed_check.returncode == 0, refreshed_check.stderr or refreshed_check.stdout
-    refreshed_snapshot = next(
-        line.split("=", 1)[1]
-        for line in refreshed_check.stdout.splitlines()
-        if line.startswith("snapshot_id=")
-    )
-    assert refreshed_snapshot != snapshot_id
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "base"], check=True)
+    result = run_script(repo, "--prepare")
+    assert result.returncode == 0, result.stderr
+    assert "NEEDS_CONFIGURATION" in result.stdout  # Unknown targets still support source work.
+    assert sorted(p.name for p in (repo / ".codex-project").iterdir()) == ["variant.md"]
+    assert (repo / "AGENTS.md").exists()
+    view = repo / ".codex-project/variant.md"
+    assert onboard.variant_fields(view.read_text(encoding="utf-8"))["构建命令"] == "未确认"
+    first_time = view.stat().st_mtime_ns
+    assert run_script(repo, "--prepare").returncode == 0
+    assert view.stat().st_mtime_ns == first_time
+    local = repo / ".codex-project/local.md"
+    local.write_bytes(b"User-owned local instructions\r\n")
+    agents = repo / "AGENTS.md"
+    agents.write_bytes(b"# Custom project rules\r\nDo not overwrite\r\n")
+    assert run_script(repo, "--write", "--force").returncode == 0
+    assert local.read_bytes() == b"User-owned local instructions\r\n"
+    assert agents.read_bytes() == b"# Custom project rules\r\nDo not overwrite\r\n"
+    assert run_script(repo, "--check").returncode == 0
+    header.write_text(header.read_text() + "// changed source\n")
+    before = view.read_bytes()
+    assert run_script(repo, "--check").returncode == 2
+    assert view.read_bytes() == before
+    assert run_script(repo, "--prepare").returncode == 0
+    assert run_script(repo, "--check").returncode == 0
+    subprocess.run(["git", "-C", str(repo), "branch", "-m", "changed-branch"], check=True)
+    assert run_script(repo, "--prepare").returncode == 0
+    assert onboard.variant_fields(view.read_text(encoding="utf-8"))["branch"] == "changed-branch"
 
-with tempfile.TemporaryDirectory(prefix="project-onboard-variant-") as temp:
-    repo = Path(temp) / "example_variant"
-    yl_dir = repo / "gui" / "lv_watch" / "lv_apps" / "yl"
-    yl_dir.mkdir(parents=True)
-    (yl_dir / "yl.h").write_text(
-        '#define yl_device_name "SAMPLE"\n#define yl_device_ver "SAMPLE_LZ_3602_TEST"\n#define yl_hw_ver "SAMPLE_LZ_3602"\n',
-        encoding="utf-8",
-    )
-    branch = "sample_lz_3602_20260101"
-    subprocess.run(["git", "init", "-q", "-b", branch, str(repo)], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
-    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "base"], check=True)
-    write = run_script(repo, "--write")
-    assert write.returncode == 0, write.stderr or write.stdout
-    variant_path = repo / ".codex-project" / "variant.md"
-    first = variant_path.read_text(encoding="utf-8")
-    assert "TARGET_OS：`ALIOS`" in first
-    subprocess.run(["git", "-C", str(repo), "branch", "-m", "sample_lz_3602_20260102"], check=True)
-    refresh = run_script(repo, "--write")
-    assert refresh.returncode == 0, refresh.stderr or refresh.stdout
-    second = variant_path.read_text(encoding="utf-8")
-    assert "branch：`sample_lz_3602_20260102`" in second
-    assert ".codex-project/variant.md" in refresh.stdout.split("written=", 1)[-1]
-
-with tempfile.TemporaryDirectory(prefix="project-onboard-app-") as temp:
-    repo = Path(temp) / "example_app_firmware"
-    yl_dir = repo / "gui" / "lv_watch" / "lv_apps" / "yl"
-    yl_dir.mkdir(parents=True)
-    (yl_dir / "yl.h").write_text(
-        '#define yl_device_name "LT52"\n'
-        '#define yl_device_ver "LT52_YD_ASR3602_TW18_APP_TEST"\n'
-        '#define yl_hw_ver "LT52_YouDao"\n',
-        encoding="utf-8",
-    )
-    branch = "TW18_LT52_3602_有道APP定制腕表20260813"
-    subprocess.run(["git", "init", "-q", "-b", branch, str(repo)], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
-    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "base"], check=True)
-    write = run_script(repo, "--write")
-    assert write.returncode == 0, write.stderr or write.stdout
-    variant = (repo / ".codex-project" / "variant.md").read_text(encoding="utf-8")
-    assert "协议：`LT52 APP协议`" in variant
-    assert "协议优先级：`APP协议 > 平台协议 > 公共固件逻辑`" in variant
 
 def mapping_entry(*, branch="SAMPLE", version="MODEL_A", project="Project A", products=("Product A",), status="confirmed", verified="true", local_tokens=()):
     lines = ["- branch_contains:", f"    - {branch}", "  yl_device_ver_contains:", f"    - {version}", "  zentao_names:", f"    - {project}"]

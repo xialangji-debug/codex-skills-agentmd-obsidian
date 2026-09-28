@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+import sys
 from typing import Any
 
 
@@ -123,6 +124,11 @@ def parse_variant_value(repo: Path, label: str) -> str:
 
 
 def read_device_version(repo: Path) -> str:
+    if (repo / ".git").exists():
+        sys.path.insert(0, str(Path.home() / ".codex/scripts"))
+        from asr360x_context import read_yl
+        value = read_yl(repo)["yl_device_ver"]
+        return "" if value == "不可用" else value
     value = parse_variant_value(repo, "`yl_device_ver`") or parse_variant_value(repo, "yl_device_ver")
     if value:
         return value
@@ -141,7 +147,14 @@ def target_context(args: argparse.Namespace) -> dict[str, Any]:
     version = compact(getattr(args, "version", "")) or read_device_version(repo) or "unknown"
     variant = compact(getattr(args, "variant", ""))
     if not variant:
-        variant = parse_variant_value(repo, "禅道产品") or parse_variant_value(repo, "客户/产品变体")
+        if (repo / ".git").exists():
+            sys.path.insert(0, str(Path.home() / ".codex/scripts"))
+            from asr360x_context import read_context
+            live = read_context(repo)
+            variant = live["product_name"] if live["product_name"] != "未确认" else ""
+        else:
+            # Preserve explicit historical/fixture contexts outside a live repository.
+            variant = parse_variant_value(repo, "禅道产品") or parse_variant_value(repo, "客户/产品变体")
     variant_id = compact(getattr(args, "variant_id", "")) or (digest(normalize_identity(variant), 12) if variant else "")
     project_key = compact(getattr(args, "project_key", "")) or repo.name
     target_source = "|".join([repo_id, branch, version, variant_id])

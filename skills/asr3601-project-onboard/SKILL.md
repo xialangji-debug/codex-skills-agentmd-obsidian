@@ -1,42 +1,36 @@
 ---
 name: asr3601-project-onboard
-description: Create, refresh, or check ASR360x project context and its canonical variant fingerprint. Use for project onboarding, 生成项目 AGENTS, 记录编译命令, 生成变体指纹, or a task owner that needs missing/stale identity. Ordinary source questions and direct release calls do not require a separate onboarding pass.
+description: Prepare recorded ASR360x branch configuration after a checkout, recover missing generated context, or register confirmed build parameters. Use for 切换后初始化, 调取版本配置, 生成项目 AGENTS, or a missing build profile. Ordinary source questions and direct build/release requests use their owners without an extra onboarding pass.
 ---
 
-# ASR3601 Project Onboard
+# ASR360x Project Configuration
 
-Keep shared procedures in global Skills and project identity in one generated variant.md. Preserve project-owned extensions.
+Live Git and yl.h own current identity. The registered branch profile owns build parameters. The existing private project map owns external mappings. variant.md is a generated view.
 
-## Load Only What The Task Needs
+## Prepare Configuration
 
-- Ordinary read-only source question: use live source and the established route.
-- Explicit context check or missing exact identity: run --check once. Reuse its snapshot_id within the same logical task.
-- Initialization or stale required identity: inspect the relevant live facts and generate with --write.
-- Stable template maintenance: review generated changes before --write --force; preserve project-specific additions.
-- A direct build/release/Zentao controller owns its required checks. Do not put an extra onboarding call before it.
+After an authorized branch switch, run the generator with --prepare once. Build and release controllers restore their profiles internally; do not repeat initialization outside the owner.
 
-Invalidate a task snapshot after a switch, unexpected HEAD/worktree drift, or changed yl_device_name/yl_device_ver/yl_hw_ver. An owner's own commit may update its expected HEAD without regenerating all project files. A snapshot is an in-task receipt, not a new persistent cache.
+Records live under the Git common directory's codex/build-profiles/. Worktrees share branch records but keep their own current profile. Version dates and ordinary commits do not require registering build parameters again. Hardware or build-input changes require verified updated settings.
 
 ## Generation Contract
 
-1. Read branch, HEAD, dirty state, and yl.h from the selected repo. Match the private project map's branch and version constraints.
-2. Use unique confirmed mappings only. A candidate token match, version mismatch, ambiguous product, or explicit unconfirmed status stays needs-confirmation. Legacy entries with a recorded verification and unique identity remain supported.
-3. Keep branch/commit/dirty, yl identity, chip/OS/protocol/build values, external IDs, device parameters, and memory IDs/aliases only in .codex-project/variant.md.
-4. Generate AGENTS.md and .codex-project/{index,zentao,build,protocol,variant,device,memory}.md. Stable files contain rules and navigation, not copied dynamic facts.
-5. Add generated context to Git's local exclude unless --no-exclude is requested. Preserve .codex-project/local.md byte-for-byte; never create or overwrite it.
-6. Treat protocol classification from identity tokens as a search hint. Confirm the active protocol in code/documents before a protocol-sensitive action. A generated build candidate also needs a project-confirmed command/profile before execution.
-7. Report changed paths, snapshot status, and unresolved identity. Link mapped source documents when they are relevant to the task.
+1. Use live identity and unique confirmed mappings. Missing or ambiguous build records remain NEEDS_CONFIGURATION; ordinary source work can continue.
+2. Default context consists of AGENTS.md, .codex-project/asr3602-build-profile.json, and .codex-project/variant.md. Write only changed generated files.
+3. Preserve local.md, project-owned AGENTS content, specialized documents, resources, and validation material. --force does not erase project-owned instructions.
+4. Protocol classification is only a search hint. Device selection and remote writes retain their owner's checks.
+5. For first registration or a confirmed update, use [branch profile operations](references/branch-profiles.md). Reuse user-supplied parameters and exact-target evidence before asking for missing facts. Do not qualify a build from folder tokens or a copied support label.
 
 Repository and variant hashes are privacy-safe identifiers. Target IDs retain branch/version case and match the canonical memory writer and Zentao reconciliation; do not rewrite historical memory targets during onboarding.
 
 ## Commands
 
-The generator uses Python with PyYAML for structured project-map parsing.
+The generator uses Python; private project-map parsing uses PyYAML.
 
 ```powershell
 python "$env:USERPROFILE\.codex\skills\asr3601-project-onboard\scripts\project_onboard.py" --repo . --check
 python "$env:USERPROFILE\.codex\skills\asr3601-project-onboard\scripts\project_onboard.py" --repo . --dry-run
-python "$env:USERPROFILE\.codex\skills\asr3601-project-onboard\scripts\project_onboard.py" --repo . --write
+python -X utf8 "$env:USERPROFILE\.codex\skills\asr3601-project-onboard\scripts\project_onboard.py" --repo . --prepare
 ```
 
---write updates variant.md and creates missing stable files. --force also replaces generated stable files; review their ownership first. A current --check prints snapshot_id; a stale result identifies the differences. Never store private customer mappings or service data in reusable templates.
+--check is read-only; --dry-run previews. --write remains an alias for preparation and view generation. Add --json for structured context. A record does not replace current Git state or actual device verification. Never store private customer mappings or service data in reusable templates.

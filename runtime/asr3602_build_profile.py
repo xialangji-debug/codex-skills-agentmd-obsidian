@@ -13,6 +13,8 @@ import subprocess
 import sys
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 
 SCHEMA_VERSION = 1
 PROFILES = ("release", "normal-test", "dump-test")
@@ -29,6 +31,25 @@ class ProfileError(RuntimeError):
     pass
 
 
+def expand_adapter(value: dict[str, Any]) -> dict[str, Any]:
+    """Expand compact v2 commands for existing v1 consumers without dropping overrides."""
+    import copy
+    if value.get("schemaVersion") != 2:
+        return copy.deepcopy(value)
+    adapter = copy.deepcopy(value)
+    adapter["schemaVersion"] = 1
+    adapter["inputSchemaVersion"] = 2
+    try:
+        args = ["make", adapter["buildTarget"], f"TARGET_OS={adapter['targetOs']}",
+                f"PS_MODE={adapter['psMode']}", f"CHIP_ID={adapter['chipId']}"]
+    except KeyError as exc:
+        raise ProfileError(f"compact profile missing build field: {exc}") from exc
+    build = adapter.setdefault("build", {})
+    build.setdefault("command", " ".join(args))
+    build.setdefault("commandArgs", args)
+    return adapter
+
+
 def read_json(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -36,7 +57,7 @@ def read_json(path: Path) -> dict[str, Any]:
         raise ProfileError(f"cannot read adapter JSON: {path}: {exc}") from exc
     if not isinstance(value, dict):
         raise ProfileError("adapter root must be a JSON object")
-    return value
+    return expand_adapter(value)
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -309,6 +330,15 @@ def _read_define(repo: Path, charging: dict[str, Any]) -> tuple[Path, int]:
 
 
 def _variant_checks(repo: Path, adapter: dict[str, Any]) -> list[str]:
+    if adapter.get("contextBinding"):
+        from asr360x_profile_store import assert_binding, live_binding
+        try:
+            assert_binding(adapter["contextBinding"], live_binding(repo))
+        except ValueError as exc:
+            raise ProfileError(str(exc)) from exc
+        return ["live Git/product/build identity matches registered profile"]
+    # Compatibility for explicit, unregistered v1 adapters. Default controller
+    # entrypoints prepare a registered profile and do not take this path.
     variant_path = repo / ".codex-project" / "variant.md"
     if not variant_path.is_file():
         raise ProfileError(f"project variant fingerprint is missing: {variant_path}")
@@ -347,6 +377,7 @@ def preflight(
     *,
     allow_candidate: bool = False,
     allow_release_version_resume: bool = False,
+    allow_dirty_source: bool = False,
     expected_release_time: str = "",
 ) -> dict[str, Any]:
     if profile not in PROFILES:
@@ -360,7 +391,16 @@ def preflight(
     variant_checks = _variant_checks(repo, adapter)
     identity = git_identity(repo)
     release_resume = {"allowed": False}
-    if profile == "release" and identity["dirty"]:
+    if allow_dirty_source and profile != "release":
+        raise ProfileError("allow-dirty-source is only supported for release")
+    if allow_dirty_source:
+        if _run_git(repo, "ls-files", "--unmerged"):
+            raise ProfileError("dirty-source release refuses unresolved conflicts")
+        if any(line.startswith("??") for line in identity["dirty"]):
+            raise ProfileError("dirty-source release refuses untracked files; stage intended source first")
+        identity["diffSha256"] = sha256_bytes(_run_git_bytes(repo, "diff", "--binary", "HEAD", "--"))
+        identity["releaseMode"] = "uncommitted-source"
+    if profile == "release" and identity["dirty"] and not allow_dirty_source:
         if not allow_release_version_resume:
             raise ProfileError("release profile requires a clean worktree before Git sync or version mutation")
         release_resume = _validate_release_version_resume(repo, identity, expected_release_time)
@@ -459,6 +499,7 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "preflight":
             child.add_argument("--allow-candidate", action="store_true", help=argparse.SUPPRESS)
             child.add_argument("--allow-release-version-resume", action="store_true", help=argparse.SUPPRESS)
+            child.add_argument("--allow-dirty-source", action="store_true")
             child.add_argument("--expected-release-time", default="", help=argparse.SUPPRESS)
     return parser
 
@@ -477,6 +518,8 @@ def main(argv: list[str] | None = None) -> int:
                 "adapterSha256": sha256_file(adapter_path),
                 "adapter": validate_adapter(adapter, repo),
             }
+            if adapter.get("contextBinding"):
+                result["identityChecks"] = _variant_checks(repo, adapter)
         elif args.command == "describe":
             result = describe(args.profile, adapter_path, repo)
         else:
@@ -486,6 +529,7 @@ def main(argv: list[str] | None = None) -> int:
                 repo,
                 allow_candidate=args.allow_candidate,
                 allow_release_version_resume=args.allow_release_version_resume,
+                allow_dirty_source=args.allow_dirty_source,
                 expected_release_time=args.expected_release_time,
             )
     except ProfileError as exc:

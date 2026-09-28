@@ -5,6 +5,8 @@ description: Build a normal local ASR360x firmware package, flash an existing ve
 
 # ASR360x Local Build And Flash
 
+The controller restores/prepares the registered branch profile internally. Reuse its result; do not run another full onboarding step or require navigation Markdown before this operation.
+
 Select one mode and load only its required context.
 
 | Request | Mode | Required context |

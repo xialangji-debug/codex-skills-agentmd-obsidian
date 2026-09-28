@@ -56,9 +56,9 @@ a concise required remark. Do not infer either choice from a title.
 - Resolve only explicitly selected IDs or IDs in an approved plan; never resolve
   the full fetched list.
 - Require detail-page `所属产品` to exactly match the confirmed `禅道产品` in
-  `.codex-project/variant.md`. Missing, ambiguous, unconfirmed, or branch-mismatched
+  the shared live ASR context and existing private project map. Missing, ambiguous, unconfirmed, or branch-mismatched
   mappings stop before browser access. Legacy `zentao.md` mappings are supported
-  only when variant.md is absent. An explicit product cannot override a conflicting
+  only for historical contexts outside a live repository. An explicit product cannot override a conflicting
   current mapping; prefix similarity is not enough.
 - `--allow-product-mismatch` is only for explicitly authorized corrective
   reactivation with `--reactivate-resolved`, never ordinary resolution.

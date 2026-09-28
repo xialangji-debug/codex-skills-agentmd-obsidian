@@ -16,6 +16,7 @@ function Invoke-Selector {
         "-ExecutionPolicy", "Bypass",
         "-File", $scriptPath,
         "-Repo", $Repo,
+        "-BuildProfileAdapter", (Join-Path $Repo ".codex-project\explicit-test-profile.json"),
         "-NoBuild",
         "-NoFlash"
     )
@@ -40,6 +41,7 @@ function Invoke-CleanBuild {
         "-ExecutionPolicy", "Bypass",
         "-File", $scriptPath,
         "-Repo", $Repo,
+        "-BuildProfileAdapter", (Join-Path $Repo ".codex-project\explicit-test-profile.json"),
         "-BuildCommand", "make craneg_modem_watch TARGET_OS=ALIOS PS_MODE=LITE_LTEONLY CHIP_ID=CRANEL",
         "-Target", "craneg_modem_watch",
         "-CleanTargetOutput",
@@ -107,7 +109,7 @@ try {
         allowedTemporaryFiles = @("config/watchdog.json")
         forbiddenSourceMarkers = @([ordered]@{ path = "src/at.c"; marker = "ASR360X_DUMP_ACCEPTANCE_TEST" })
         dumpAcceptance = [ordered]@{ sourcePath = "src/at.c"; marker = "ASR360X_DUMP_ACCEPTANCE_TEST" }
-    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $contextDir "asr3602-build-profile.json") -Encoding UTF8
+    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $contextDir "explicit-test-profile.json") -Encoding UTF8
 
     $normal = Join-Path $productDir "firmware_release.zip"
     $source = Join-Path $productDir "firmware_source.zip"

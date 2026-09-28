@@ -166,7 +166,8 @@ Write-Host "Repo: $repoPath"
 if ([string]::IsNullOrWhiteSpace($BuildProfileAdapter)) {
     $BuildProfileAdapter = Join-Path $repoPath ".codex-project\asr3602-build-profile.json"
 }
-$BuildProfileAdapter = Resolve-ExistingPath -PathValue $BuildProfileAdapter -BasePath $repoPath
+. (Join-Path $env:USERPROFILE '.codex\scripts\asr360x_context.ps1')
+$BuildProfileAdapter = Resolve-AsrBranchBuildProfile -RepoPath $repoPath -AdapterPath $BuildProfileAdapter
 $profileScript = Join-Path $HOME ".codex\scripts\asr3602_build_profile.py"
 if (-not (Test-Path -LiteralPath $profileScript -PathType Leaf)) {
     throw "Shared ASR3602 build profile script not found: $profileScript"

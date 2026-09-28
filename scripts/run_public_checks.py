@@ -103,6 +103,9 @@ def install_smoke_test(temp_root: Path) -> None:
         codex_home / "skills-index" / "index.md",
         codex_home / "scripts" / "asr3602_build_profile.py",
         codex_home / "scripts" / "asr360x_build_runtime.ps1",
+        codex_home / "scripts" / "asr360x_context.py",
+        codex_home / "scripts" / "asr360x_context.ps1",
+        codex_home / "scripts" / "asr360x_profile_store.py",
         vault / "Codex" / "AGENTS.md",
     ]
     manifest = json.loads((ROOT / "public-sync-manifest.json").read_text(encoding="utf-8"))
@@ -113,6 +116,30 @@ def install_smoke_test(temp_root: Path) -> None:
     installed = {path.parent.name for path in (codex_home / "skills").glob("*/SKILL.md")}
     if installed != set(manifest["skills"]):
         raise SystemExit("installed Skills differ from the public manifest")
+    run(
+        "installed ASR runtime imports",
+        [
+            sys.executable, "-X", "utf8", "-c",
+            "import sys; from pathlib import Path; "
+            "sys.path.insert(0, str(Path.home() / '.codex' / 'scripts')); "
+            "from asr360x_context import read_context; "
+            "from asr360x_profile_store import prepare; "
+            "from asr3602_build_profile import validate_adapter",
+        ],
+    )
+    powershell = shutil.which("pwsh")
+    if powershell:
+        run(
+            "installed ASR PowerShell context syntax",
+            [
+                powershell, "-NoProfile", "-Command",
+                "$parseErrors = $null; $tokens = $null; "
+                "[void][System.Management.Automation.Language.Parser]::ParseFile("
+                "(Join-Path $env:USERPROFILE '.codex/scripts/asr360x_context.ps1'), "
+                "[ref]$tokens, [ref]$parseErrors); "
+                "if ($parseErrors.Count) { $parseErrors; exit 1 }",
+            ],
+        )
     (codex_home / "skills.disabled").mkdir()
     (codex_home / "plugins" / "cache").mkdir(parents=True)
     run(
