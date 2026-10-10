@@ -159,6 +159,22 @@ def variant_field(text: str, name: str) -> str:
 
 
 def infer_variant(repo: Path, fingerprint: dict[str, str], files: Sequence[Path]) -> dict[str, str]:
+    if (repo / '.git').exists() and (repo / 'gui/lv_watch/lv_apps/yl/yl.h').exists():
+        sys.path.insert(0, str(Path.home() / '.codex/scripts'))
+        from asr360x_context import read_context
+        from asr360x_profile_store import prepare
+        live = read_context(repo)
+        try:
+            build = prepare(repo, write=False)
+        except (ValueError, OSError, RuntimeError):
+            build = {}
+        return {
+            'yl_device_name': live['yl_device_name'], 'yl_device_ver': live['yl_device_ver'],
+            'yl_hw_ver': live['yl_hw_ver'], 'chip': build.get('chipId', '未确认'),
+            'os': build.get('targetOs', '未确认'), 'protocol': '需依据当前源码确认',
+            'customer': live['product_name'], 'build_params': build.get('buildCommand', '未确认'),
+            'fingerprint_source': 'live Git/yl.h and registered branch configuration',
+        }
     values = {"yl_device_name": "未识别", "yl_device_ver": "未识别", "yl_hw_ver": "未识别"}
     preferred = [repo / "gui/lv_watch/lv_apps/yl/yl.h"]
     preferred.extend(path for path in files if path.name.casefold() == "yl.h" and path not in preferred)

@@ -21,16 +21,8 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(line_buffering=True)
 
 
-REQUIRED_CONTEXT = (
-    "AGENTS.md",
-    ".codex-project/index.md",
-    ".codex-project/zentao.md",
-    ".codex-project/build.md",
-    ".codex-project/protocol.md",
-    ".codex-project/variant.md",
-    ".codex-project/device.md",
-    ".codex-project/memory.md",
-)
+REQUIRED_CONTEXT = ()  # Fetch validates live identity and its own product mapping.
+
 
 
 def run_text(command: list[str], cwd: Path) -> str:
@@ -295,24 +287,7 @@ def validate_snapshot(
 
 
 def variant_is_stale(repo: Path, payload: dict) -> bool:
-    variant = repo / ".codex-project" / "variant.md"
-    if not variant.is_file():
-        return True
-    text = variant.read_text(encoding="utf-8", errors="replace")
-    context = payload.get("context") or {}
-    expected_lines = [
-        ("branch", "- branch：`{}`"),
-        ("commit", "- commit：`{}`"),
-        ("deviceVer", "- `yl_device_ver`：`{}`"),
-        ("projectName", "- 禅道项目：`{}`"),
-        ("productName", "- 禅道产品：`{}`"),
-        ("projectId", "- project_id：`{}`"),
-        ("productId", "- product_id：`{}`"),
-    ]
-    for key, template in expected_lines:
-        value = str(context.get(key, ""))
-        if value and template.format(value) not in text:
-            return True
+    """Compatibility hook: generated views do not control fetching."""
     return False
 
 

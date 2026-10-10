@@ -35,10 +35,10 @@ Search priority: `fix-patterns/`, `projects/`, `learning/topics/`, `notes/`, `pe
 
 ## Project And Skill Routing
 
-Use current-task skill descriptions. The repository's `AGENTS.md` and `.codex-project/index.md` own local routing: follow the matching route and linked context without repeating an ASR/ESP32 classifier. Consult `%USERPROFILE%\.codex\skills-index\index.md` only if local routing is missing or unclear. Keep specialist procedures in their owning skill.
+Use current-task skill descriptions. For ASR360x, project `AGENTS.md` records special routes; branch profiles and live source provide configuration and identity. Other projects may keep their own `.codex-project/index.md` routing. Follow the matching route without repeating a domain classifier. Consult `%USERPROFILE%\.codex\skills-index\index.md` only if local routing is missing or unclear. Keep specialist procedures in their owning skill.
 
-- Stable rules/navigation: `AGENTS.md`, `.codex-project/index.md`, optional `.codex-project/local.md`.
-- Dynamic identity only: `.codex-project/variant.md` for branch, commit, dirty state, product/version, protocol, build parameters, device identity, and external IDs.
+- ASR stable rules/navigation: minimal `AGENTS.md` and optional project-owned `.codex-project/local.md`. Preserve specialized documents containing project-specific content.
+- ASR identity: live Git and source; build parameters: confirmed branch profile; external mappings: existing private project map. `.codex-project/variant.md` is a generated view. After a branch switch, prepare the recorded configuration once; build/release controllers do this internally.
 - Read-only lookup: use current context and live source; refresh full identity or check tool health only when evidence is missing or a tool fails.
 - Local source edits: check branch, HEAD, and dirty state once; preserve unrelated changes and follow the implementation skill's Fast Fix procedure.
 - Cross-branch, protocol, build, flash, release, device, or external-system work: use the owner and let it refresh the stale identity it needs. Reuse its verification and result receipt; do not repeat controller-owned checks outside the controller. Route bug-system access and remote writes to their owners.
@@ -50,7 +50,7 @@ If a required active skill is not exposed, read `%USERPROFILE%\.codex\skills\<sk
 
 ## Quick Release Mode
 
-For ASR3601/ASR3602/360x, the exact phrase `快速出版本` selects Quick Release Mode, including the release stage of a composite request. Use the formal-release owner/controller confirmed by the current project index; for `akq-firmware-release`, use its Quick Release Mode. If no owner/controller is confirmed, ask instead of borrowing another project's script.
+For ASR3601/ASR3602/360x, the exact phrase `快速出版本` selects Quick Release Mode, including the release stage of a composite request. Use the formal-release owner/controller confirmed by project AGENTS or applicable project routing; for `akq-firmware-release`, use its Quick Release Mode. If no owner/controller is confirmed, ask instead of borrowing another project's script.
 
 Run the controller once directly, with no external preflight or post-success verification, and reply concisely. Preserve its built-in gates. The modifier grants no additional authorization for commits, staging, stashing, discards, flashing, Zentao writes, overwrites, gate bypasses, or recovery.
 
@@ -85,3 +85,12 @@ python -X utf8 "$env:USERPROFILE\.codex\scripts\architecture_audit.py" all --ski
 ```
 
 Ordinary firmware fixes/builds/releases use their owner gates. After broad architecture changes, create a self-verifying control/work-Vault/project-context snapshot using `pwsh -File "$env:USERPROFILE\.codex\scripts\create_architecture_snapshot.ps1"` with a `-SourceSpec` that excludes LifeVault.
+
+## Local Validation Scripts
+
+Applies to all repositories, branches, and worktrees:
+
+- Temporary Python tests, regression checks, and diagnostic scripts created for a task are local validation tools; do not stage or commit them unless the user explicitly requests those files.
+- Create new temporary scripts, fixtures, generated C files, executables, and logs under `.codex-project/validation/<task-or-bug>/`. Do not add temporary validation scripts to `tools/lv_utils/`.
+- Before committing, inspect the staged paths and exclude task-local validation artifacts. Do not use force-add to bypass ignore rules without an explicit request to commit those files.
+- Preserve tracked production tests and tools. Do not delete, untrack, or discard them automatically; existing tracked temporary tests require explicit cleanup authorization.

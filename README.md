@@ -88,6 +88,19 @@ bash scripts/install.sh
 
 安装后重新打开 Codex，让新的 Skills 和 `AGENTS.md` 生效。
 
+### ASR360x 共享运行依赖
+
+安装脚本将 `runtime/` 复制到所选 Codex 目录的 `scripts/`，供项目初始化、收尾验证和构建入口共同使用。公开快照包含以下依赖：
+
+| 文件 | 用途 |
+| --- | --- |
+| `asr360x_context.py` | 从当前 Git 和源码读取项目身份，并解析使用者配置的项目映射 |
+| `asr360x_profile_store.py` | 注册、校验和恢复绑定分支的构建配置 |
+| `asr360x_context.ps1` | PowerShell 构建入口的分支配置解析 |
+| `asr3602_build_profile.py` / `asr360x_build_runtime.ps1` | 构建配置校验和共享构建执行 |
+
+真实项目映射、分支构建记录和设备配置仍由使用者在本机维护，不包含在公开包内。公共检查会在隔离安装环境验证共享模块导入和 PowerShell helper 语法，避免依赖开发者本机已有文件。
+
 ## Codex 提供什么，本仓库增加什么
 
 Codex 原生扩展点：

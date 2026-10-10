@@ -323,6 +323,14 @@ function identityHash(value, length) {
   return crypto.createHash("sha256").update(`${value || ""}`.trim().replace(/\s+/g, " ").replace(/\\/g, "/").toLowerCase(), "utf8").digest("hex").slice(0, length);
 }
 
+function liveAsrContext(repo) {
+  if (!fs.existsSync(path.join(repo, ".git"))) return null; // Explicit historical fixtures.
+  const script = path.join(os.homedir(), ".codex", "scripts", "asr360x_context.py");
+  const result = cp.spawnSync("python", ["-X", "utf8", script, "--repo", repo], { encoding: "utf8", timeout: 30000 });
+  if (result.status !== 0) throw new Error(`Unable to read live ASR identity: ${result.stderr || result.stdout}`);
+  return JSON.parse(result.stdout);
+}
+
 function variantValue(repo, label) {
   const variant = path.join(repo, ".codex-project", "variant.md");
   if (!fs.existsSync(variant)) return "";
@@ -337,7 +345,8 @@ function variantValue(repo, label) {
 function memoryTargetContext(ctx, expectedProduct) {
   const remote = run(["git", "remote", "get-url", "origin"], ctx.repo);
   const repoId = identityHash(remote || ctx.repo, 12);
-  const version = variantValue(ctx.repo, "`yl_device_ver`") || variantValue(ctx.repo, "yl_device_ver") || "unknown";
+  const live = ctx.asrContext || (ctx.asrContext = liveAsrContext(ctx.repo));
+  const version = live ? live.yl_device_ver : (variantValue(ctx.repo, "`yl_device_ver`") || variantValue(ctx.repo, "yl_device_ver") || "unknown");
   const variantId = expectedProduct ? identityHash(expectedProduct, 12) : "";
   return {
     target_id: crypto.createHash("sha256").update([repoId, ctx.branch, version, variantId].map((value) => value.trim().replace(/\s+/g, " ")).join("|"), "utf8").digest("hex").slice(0, 16),
@@ -388,7 +397,14 @@ function productNamesEqual(left, right) {
   return Boolean(a && b && a === b);
 }
 
-function expectedProductFromRepo(repo) {
+function expectedProductFromRepo(repo, live = undefined) {
+  if (live === undefined) live = liveAsrContext(repo);
+  if (live) {
+    if (live.mapping_status !== "confirmed") throw new Error("Live Zentao product mapping is not confirmed.");
+    const product = usableProduct(live.product_name);
+    if (!product) throw new Error("Missing confirmed live Zentao product.");
+    return product;
+  }
   const variantPath = path.join(path.resolve(repo), ".codex-project", "variant.md");
   if (fs.existsSync(variantPath)) {
     if (variantValue(repo, "映射状态") !== "confirmed") {
@@ -425,12 +441,13 @@ function requireProductContext(args) {
 
 function resolveExpectedProduct(args, ctx) {
   if (args.allowProductMismatch && args.reactivateResolved) return usableProduct(args.expectedProduct);
-  const mapped = expectedProductFromRepo(ctx.repo);
+  const live = ctx.asrContext || (ctx.asrContext = liveAsrContext(ctx.repo));
+  const mapped = expectedProductFromRepo(ctx.repo, live);
   const explicit = usableProduct(args.expectedProduct);
   if (explicit && mapped && !productNamesEqual(explicit, mapped)) {
     throw new Error("Explicit Zentao product differs from the confirmed project mapping.");
   }
-  const branch = variantValue(ctx.repo, "branch");
+  const branch = live ? live.branch : variantValue(ctx.repo, "branch");
   if (branch && ctx.branch && branch !== ctx.branch) {
     throw new Error("Zentao product mapping belongs to a different branch; refresh variant.md.");
   }

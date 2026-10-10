@@ -50,6 +50,23 @@ def read_yl_device_ver(repo: Path) -> str:
 def canonical_variant_snapshot(
     repo: Path, live_branch: str, live_commit: str, live_dirty: str
 ) -> tuple[str, list[str]]:
+    if (repo / ".git").exists():
+        import sys
+        import json
+        sys.path.insert(0, str(Path.home() / ".codex/scripts"))
+        from asr360x_context import read_context
+        try:
+            live = read_context(repo)
+        except (ValueError, OSError) as exc:
+            return str(exc), ["live identity unavailable"]
+        errors = []
+        if live["branch"] != (live_branch.strip() or "detached"):
+            errors.append("branch changed during closeout")
+        if not (live_commit.startswith(live["commit"]) or live["commit"].startswith(live_commit)):
+            errors.append("commit changed during closeout")
+        if live["dirty"].strip() != (live_dirty.strip() or "干净"):
+            errors.append("worktree changed during closeout")
+        return json.dumps(live, ensure_ascii=False, indent=2), errors
     path = repo / ".codex-project" / "variant.md"
     if not path.exists():
         return (

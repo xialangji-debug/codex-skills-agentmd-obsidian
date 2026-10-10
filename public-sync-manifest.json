@@ -7,6 +7,18 @@
       "destination": "AGENTS.md"
     },
     {
+      "source": "scripts/asr360x_context.py",
+      "destination": "runtime/asr360x_context.py"
+    },
+    {
+      "source": "scripts/asr360x_context.ps1",
+      "destination": "runtime/asr360x_context.ps1"
+    },
+    {
+      "source": "scripts/asr360x_profile_store.py",
+      "destination": "runtime/asr360x_profile_store.py"
+    },
+    {
       "source": "scripts/asr3602_build_profile.py",
       "destination": "runtime/asr3602_build_profile.py"
     },
