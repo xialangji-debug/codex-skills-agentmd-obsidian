@@ -270,7 +270,7 @@ def managed_debts(path: Path, text: str, state: dict) -> list[Debt]:
         passed: tuple[str, ...]
         pending: tuple[str, ...]
         priority: str
-        if verification == "needs_review" or implementation == "failed":
+        if verification == "needs_review" or implementation == "failed" or target.get("zentao") == "reactivated":
             passed = ("历史修复记录",)
             pending = ("重新激活复核",)
             priority = "P0"
@@ -320,16 +320,63 @@ def managed_debts(path: Path, text: str, state: dict) -> list[Debt]:
     return debts
 
 
-def scan(root: Path) -> tuple[list[Debt], int, int]:
+def history_target_fingerprint(target: dict) -> str:
+    """Bind a scheduling decision to the exact evidence, not just a target id."""
+    return hashlib.sha256(json.dumps(target, ensure_ascii=False, sort_keys=True,
+                                     separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def load_history_review(root: Path) -> dict[tuple[str, str], dict]:
+    """This is a reviewed work-list filter, never firmware verification state."""
+    path = root.parent / "agent" / "validation-history-review.json"
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
+    if data.get("schema_version") != 1 or not isinstance(data.get("entries"), list):
+        raise ValueError(f"Invalid history review: {path}")
+    result = {}
+    for entry in data["entries"]:
+        required = ("note", "target_id", "fix_id", "note_sha256", "target_sha256", "reason", "evidence", "reviewed_at")
+        if not isinstance(entry, dict) or not all(isinstance(entry.get(k), str) and entry[k] for k in required):
+            raise ValueError(f"Incomplete history review entry: {path}")
+        if Path(entry["note"]).name != entry["note"] or not entry["note"].endswith(".md"):
+            raise ValueError(f"Unsafe history review note: {entry['note']}")
+        key = (entry["note"], entry["target_id"])
+        if key in result:
+            raise ValueError(f"Duplicate history review target: {key}")
+        result[key] = entry
+    return result
+
+
+def history_review_matches(path: Path, state: dict, target: dict, entry: dict | None) -> bool:
+    if not entry or target.get("implementation") not in {"applied", "committed"}:
+        return False
+    if target.get("verification") in {"needs_review", "unverified"} or target.get("zentao") == "reactivated":
+        return False
+    if target.get("relation") in {"candidate", "not_applicable"}:
+        return False
+    return (entry["fix_id"] == state.get("fix_id")
+            and entry["target_sha256"] == history_target_fingerprint(target)
+            and entry["note_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest())
+
+
+def scan(root: Path, *, include_history: bool = False) -> tuple[list[Debt], int, int]:
     debts: list[Debt] = []
     explicit_count = 0
     files = sorted(root.glob("*.md"), key=lambda path: path.name.lower())
+    history = {} if include_history else load_history_review(root)
     for path in files:
         text = path.read_text(encoding="utf-8-sig", errors="replace")
+        meta = re.match(r"\A---\r?\n(.*?)\r?\n---", text, re.S)
+        if not include_history and meta and re.search(r"^lifecycle:\s*['\"]?(?:archived|deprecated)['\"]?\s*$", meta.group(1), re.M):
+            continue
         state = managed_state(text)
-        if state:
+        if state and state.get("targets"):
             explicit_count += 1
-            debts.extend(managed_debts(path, text, state))
+            rows = managed_debts(path, text, state)
+            by_id = {target["target_id"]: target for target in state["targets"]}
+            debts.extend(row for row in rows if not history_review_matches(
+                path, state, by_id[row.target_id], history.get((path.name, row.target_id))))
             continue
         debt, has_explicit_status = parse_note(path)
         if has_explicit_status:
@@ -422,7 +469,7 @@ def render_report(
     debt_note_count = len({debt.source for debt in debts})
     closed_count = max(0, explicit_count - debt_note_count)
     lines = [
-        "# ASR360x 验证债务报告",
+        "# 固件与工具验证债务报告",
         "",
         f"- 扫描目录：{root}",
         f"- Markdown 文件：{file_count}",
@@ -430,7 +477,7 @@ def render_report(
         f"- 当前债务笔记：{debt_note_count}",
         f"- 当前债务目标行：{len(debts)}",
         f"- 已闭环笔记：{'未计算（过滤模式）' if filtered else closed_count}",
-        "- 判定规则：每篇笔记只采纳最后一个“验证状态/验证结论”字段；正文中的历史验证说明不重新开债。",
+        "- 判定规则：受管记录按精确目标状态；无目标表的旧记录按最后一个显式验证状态。默认排除停用/归档，以及证据指纹仍一致的已审核历史工作项；这不修改或升级验证状态。",
         "",
     ]
     if not debts:
@@ -578,6 +625,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--priority", choices=["", "P0", "P1", "P2"], default="")
     parser.add_argument("--since", default="", help="Managed-target lower date bound in YYYY-MM-DD form.")
     parser.add_argument("--campaign", action="store_true", help="Append grouped validation Campaign output.")
+    parser.add_argument("--include-history", action="store_true", help="Include historical work-list decisions and deprecated/archived records without changing evidence states.")
     parser.add_argument("--campaign-json", help="Optional output path for machine-readable Campaign JSON.")
     parser.add_argument("--open-loops", help="Existing canonical open-loops.md to compare read-only.")
     parser.add_argument("--open-loops-delta", help="Output path for the standalone open-loops delta draft.")
@@ -595,7 +643,7 @@ def main() -> int:
     if bool(args.open_loops) != bool(args.open_loops_delta):
         raise SystemExit("--open-loops and --open-loops-delta must be provided together")
 
-    all_debts, file_count, explicit_count = scan(root)
+    all_debts, file_count, explicit_count = scan(root, include_history=args.include_history)
     debts = filter_debts(
         all_debts,
         domain=args.domain,
@@ -604,8 +652,12 @@ def main() -> int:
         priority=args.priority,
         since=args.since,
     )
-    filtered = any([args.domain != "all", args.project, args.branch, args.priority, args.since])
+    filtered = any([args.domain != "all", args.project, args.branch, args.priority, args.since,
+                    not args.include_history and bool(load_history_review(root))])
     print(render_report(debts, root, file_count, explicit_count, filtered=filtered))
+    if not args.include_history:
+        raw_debts, _, _ = scan(root, include_history=True)
+        print(f"\n- 历史工作项/停用记录排除目标行：{len(raw_debts) - len(all_debts)}；不是新增验证通过。")
 
     campaigns = build_campaigns(debts)
     if args.campaign:
