@@ -11,7 +11,15 @@ Live Git and yl.h own current identity. The registered branch profile owns build
 
 After an authorized branch switch, run the generator with --prepare once. Build and release controllers restore their profiles internally; do not repeat initialization outside the owner.
 
-Records live under the Git common directory's codex/build-profiles/. Worktrees share branch records but keep their own current profile. Version dates and ordinary commits do not require registering build parameters again. Hardware or build-input changes require verified updated settings.
+Records live under the Git common directory's codex/build-profiles/. Worktrees share branch records but keep their own current profile. Version dates and ordinary commits do not require registering build parameters again. Hardware or selected configuration-value changes require verified updated settings. A root Makefile/CMakeLists.txt change alone requires owner review of the relevant definitions; follow [branch profile operations](references/branch-profiles.md) to refresh unchanged settings without asking the user to confirm them again.
+
+A controller that already prepared and checked the profile can refresh generated
+views with `--refresh-view --configuration-receipt <preflight.json>`. This reuses
+its exact adapter and checks the configuration binding; it never prepares the
+profile, changes Git excludes, or creates registry/cache entries. A changed HEAD
+updates the view without re-registering unchanged build settings. Do not call this
+as an extra post-success step outside the controller. A stale receipt preserves
+the existing views and reports the mismatch.
 
 ## Generation Contract
 

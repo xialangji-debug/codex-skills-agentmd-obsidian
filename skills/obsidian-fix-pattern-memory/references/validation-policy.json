@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "default": "unknown",
+  "rules": [
+    {"id": "tooling-notes", "match": {"area": ["tooling"]}, "scope": "tool"},
+    {"id": "codex-controls", "match": {"project": ["codex-*", "asr360x-controls", "agents-md-skill-md-workflow-gpt"]}, "scope": "tool"},
+    {"id": "firmware-domains", "match": {"domains": ["asr", "esp32"]}, "scope": "firmware"}
+  ]
+}

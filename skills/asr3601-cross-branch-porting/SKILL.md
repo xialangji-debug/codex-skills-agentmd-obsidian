@@ -17,6 +17,12 @@ For a similar fix, regression, or port, search only work fix-patterns with 1-3 t
 
 ## Semantic Port
 
+For an authorized port, use the [feature preservation contract](../asr3601-lvgl-firmware-triage/references/feature-preservation.md)
+before editing and compare the affected features at completion. A read-only
+comparison reports the same differences without creating an implementation task.
+When resources or UI layout change, include the [resource delivery result](../asr3601-lvgl-firmware-triage/references/resource-delivery.md)
+in the existing port receipt.
+
 1. Inspect source artifacts and the target's existing path. For a known commit, check ancestry and use git show/diff/blame as appropriate to the requested comparison.
 2. Identify what is already present, directly transferable, requires adaptation, or is outside scope. Before a substantial patch, explain behavioral/interface differences, dependencies, excluded variants, and the proposed validation.
 3. Apply only target-relevant changes. Preserve LVGL v7/local helpers, variant guards, resource and language IDs, screen dimensions, page registration, build macros, and compatibility contracts.
@@ -25,8 +31,8 @@ For a similar fix, regression, or port, search only work fix-patterns with 1-3 t
 6. Run diff checks and the target's narrow meaningful validation. For immediate FOTA-pair delivery, let the pair builds provide full build evidence. State unavailable build/device validation precisely.
 7. Use obsidian-fix-pattern-memory once for each completed behavior-changing root-cause port, adding this exact target to the canonical note. Pass the receipt forward; do not copy the note schema or rerun closeout.
 
-Report what was ported/adapted/excluded, source and target, impact, verification, commit/staging state, memory target, and remaining risk. List further active-project candidates only when asked.
+Report the source and target, important behavior ported/adapted/excluded, actual verification, and material gaps. Keep commit/staging and memory metadata in the existing receipt; expose them when relevant to the next action. List further active-project candidates only when asked.
 
 ## Ordered Integration
 
-Read [ordered integration](references/ordered-integration.md) only for an explicit ordered commit integration. The helper requires a clean worktree and stops at the first conflict. Semantic adaptation above remains necessary when source and target behavior differ.
+Read [ordered integration](references/ordered-integration.md) only for an explicit ordered commit integration. The helper requires a clean worktree and returns at the first conflict; follow that reference for authorized mechanical resolution and continuation. Semantic adaptation above remains necessary when source and target behavior differ.

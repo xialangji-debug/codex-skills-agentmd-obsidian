@@ -1,6 +1,6 @@
 ---
 name: asr360x-bug-delivery-orchestrator
-description: Coordinate explicit multistage ASR360x bug delivery or an ordered list of selected Bugs, with one active Bug and reused specialist receipts. Use for 修复提交关禅道出版本 or ordered multi-bug work. Single-Bug lookup/fix belongs to firmware triage; fetching lists or a bare Bug ID belongs to zentao-bug-triage.
+description: Coordinate explicitly ordered ASR360x Bugs, continuous repair/commit loops, or status and resume of an existing delivery. Keep one active Bug and reuse specialist receipts. Use for 按顺序修这几个Bug, 一直修复并提交, or 继续已有交付. New single-Bug composite work uses its specialist owners directly; list/next-Bug queries belong to zentao-bug-triage.
 ---
 
 # ASR360x Bug Delivery Orchestrator
@@ -12,11 +12,24 @@ Own requested stage order, compact progress, and handoffs. Specialists own diagn
 | Request | Route |
 | --- | --- |
 | One Bug: existence, explanation, evidence, or fix | asr3601-lvgl-firmware-triage directly; no delivery state |
+| New single-Bug composite request, such as 修复提交关禅道出版本 | The calling agent sequences the requested specialist owners directly and reuses their receipts |
 | List/fetch Bugs or a bare ID without detail | zentao-bug-triage |
-| Explicit composite delivery or ordered selected Bugs | Coordinate the authorized stages below |
-| Status or resume of an existing delivery | Read its state and continue only incomplete authorized stages |
+| Ordered selected Bugs or an explicit continuous repair/commit loop | Coordinate the authorized stages below |
+| Status or resume of an existing delivery, including a legacy single-Bug delivery | Read its exact state and continue only incomplete currently authorized stages |
 
 Infer scope from the full request and reuse prior authorization. Generic completion wording does not add commits, Zentao writes, releases, or branch changes.
+
+Before the next action, use the latest request's target, selected Bugs, Git mode,
+release/upload scope, and whether continuous repair remains authorized. Keep this
+as a compact in-task scope statement. When the user changes it, apply
+[current scope](references/current-scope.md); historical state is evidence, not a
+replacement for the current request.
+
+`查下一个` is navigation through zentao-bug-triage. `修复并提交，然后查下一个`
+finishes the current Bug and investigates the next; it does not authorize repairing
+the next one. Explicit `一直修复并提交，然后查下一个` authorizes the corresponding
+ordered loop. Reuse this delivery's progress for navigation; do not create a second
+queue or infer authority from an old state after the user narrows the request.
 
 ## Delivery Loop
 
@@ -34,7 +47,7 @@ For 快速出版本, preserve the modifier: one confirmed owner-controller call,
 
 Use [delivery state](references/delivery-state.md) when per-Bug commits are explicitly part of the request and resumable state is needed. The existing stage sequence includes committed; do not fabricate a commit or stage to fit a narrower request.
 
-For commitless composite work, keep in-task receipts and perform only requested stages. In an existing ordered delivery, use the documented finish path for a diagnosed already-fixed, no-change, or external outcome; do not invent a commit or fix note. Preserve legacy states and their requested terminal stage; schema version 3 adds these outcomes without satisfying remote resolution from local classification alone.
+For commitless ordered work, keep in-task receipts and perform only requested stages. In an existing delivery, use the documented finish path for a diagnosed already-fixed, no-change, or external outcome; do not invent a commit or fix note. Legacy states retain their original terminal stage until an explicit scope change. New states default to memory_decided; selecting zentao_resolved requires the user's resolution scope. Use the existing state's narrow command to withdraw pending work, keeping completed actions and evidence intact.
 
 After an interruption, read status and check evidence for the incomplete stage before retrying an external action. An unexpected checkout/HEAD change invalidates the task snapshot. A wrong-product resolution stops release progression; use the resolver's corrective path only with the applicable authorization.
 

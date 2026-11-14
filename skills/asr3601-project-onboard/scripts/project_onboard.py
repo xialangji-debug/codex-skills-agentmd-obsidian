@@ -15,7 +15,8 @@ import asr360x_context as shared
 from asr360x_context import (RepoInfo, Mapping, run_git, read_yl, gather, identity_hash,
                             repository_id, parse_project_map, product_family,
                             protocol_profile, memory_aliases, build_identity)
-from asr360x_profile_store import prepare, atomic_write, store_root, PROFILE_PATH
+from asr360x_profile_store import (prepare, atomic_write, store_root, PROFILE_PATH,
+                                  read_object, assert_binding, live_binding, git, BuildInputsChanged)
 
 PROJECT_MAP = shared.PROJECT_MAP
 PROJECT_MAP_SOURCE = shared.PROJECT_MAP_SOURCE
@@ -34,12 +35,59 @@ def build_command(info: RepoInfo) -> tuple[str, str]:
         return "未确认", str(exc)
 
 
+def configuration_from_receipt(repo: Path, receipt_path: Path) -> dict:
+    """Reuse a controller's preflight for view generation, without preparation."""
+    receipt = read_object(receipt_path)
+    if receipt.get("status") != "PASSED":
+        raise ValueError("View refresh requires a successful controller preflight receipt")
+    receipt_repo = receipt.get("repo")
+    if not isinstance(receipt_repo, str) or Path(receipt_repo).resolve() != repo.resolve():
+        raise ValueError("Controller receipt belongs to a different repository")
+    adapter_path = Path(receipt.get("adapterPath", ""))
+    if not adapter_path.is_absolute() or not adapter_path.is_file():
+        raise ValueError("Controller receipt has no existing absolute adapterPath")
+    if hashlib.sha256(adapter_path.read_bytes()).hexdigest() != str(receipt.get("adapterSha256", "")).lower():
+        raise ValueError("Controller adapter changed after preflight; preserve the current view")
+    adapter = read_object(adapter_path)
+    source = receipt.get("source", {})
+    if not isinstance(source, dict):
+        raise ValueError("Controller receipt source must be an object")
+    if source.get("branch") != git(repo, "branch", "--show-current"):
+        raise ValueError("Controller receipt branch differs from the current checkout")
+    binding = adapter.get("contextBinding")
+    if binding is None:
+        return {
+            "status": "REFRESH_SKIPPED_UNBOUND", "receiptPath": str(receipt_path.resolve()),
+            "error": "Controller adapter has no confirmed contextBinding; existing view preserved without configuration reuse",
+        }
+    if not isinstance(binding, dict) or not binding:
+        raise ValueError("Controller adapter contextBinding is invalid; preserve the existing view")
+    assert_binding(binding, live_binding(repo, adapter))
+    summary = receipt.get("adapter", {})
+    if not isinstance(summary, dict) or not isinstance(adapter.get("build"), dict):
+        raise ValueError("Controller receipt/adapter has no build summary")
+    for key in ("buildTarget", "targetOs", "psMode", "chipId"):
+        if not isinstance(summary.get(key), str) or summary[key] != adapter.get(key):
+            raise ValueError(f"Controller receipt disagrees with its adapter: {key}")
+    if summary.get("buildCommand") != adapter.get("build", {}).get("command"):
+        raise ValueError("Controller receipt disagrees with its adapter: buildCommand")
+    return {
+        "status": "REUSED",
+        "source": "controller-receipt", "receiptPath": str(receipt_path.resolve()),
+        "adapterPath": str(adapter_path), "bindingVerified": True,
+        **{key: summary[key] for key in ("buildTarget", "targetOs", "psMode", "chipId", "buildCommand")},
+    }
+
+
 def render_files(info: RepoInfo, config: dict | None = None) -> dict[str, str]:
     mapping = match_mapping(info)
     ctx = shared.context_from_info(info, mapping)
     if config is not None:
         command = config.get("buildCommand", "未确认")
-        source = "Confirmed branch record: " + config["recordPath"] if config.get("recordPath") else config.get("error", "未确认")
+        if config.get("receiptPath"):
+            source = "Controller configuration receipt (" + config["status"] + "): " + config["receiptPath"]
+        else:
+            source = "Confirmed branch record: " + config["recordPath"] if config.get("recordPath") else config.get("error", "未确认")
     else:
         command, source = build_command(info)
     chip, os_name, ps = build_identity(command)
@@ -54,7 +102,7 @@ def render_files(info: RepoInfo, config: dict | None = None) -> dict[str, str]:
 - Build/release entrypoints prepare their own configuration. Reuse their result; do not add another full initialization.
 - Formal release: `akq-firmware-release`. Normal build/flash: `asr3602-local-build-flash`. FOTA pair: `asr3602-fota-pair-release`.
 - Bug list/detail: `zentao-bug-triage`. Current-branch fix: `asr3601-lvgl-firmware-triage`. Cross-branch port: `asr3601-cross-branch-porting`.
-- Protocol evidence: `asr3601-protocol-branch-matrix`. CATStudio logs: `catstudio-log-extractor`.
+- Protocol evidence and standalone protocol imports: `asr3601-lvgl-firmware-triage` protocol mode. CATStudio logs: `catstudio-log-extractor`.
 - Preserve unrelated source changes and project-owned documents. Read `.codex-project/local.md` only when relevant; never overwrite it automatically.
 - Record completed behavior fixes through `obsidian-fix-pattern-memory`; keep build evidence separate from device verification.
 """
@@ -67,7 +115,7 @@ def render_files(info: RepoInfo, config: dict | None = None) -> dict[str, str]:
         ("产品族", product_family(info)), ("客户/产品变体", info.branch),
         ("yl_device_name", info.yl_device_name), ("yl_device_ver", info.yl_device_ver),
         ("yl_hw_ver", info.yl_hw_ver), ("CHIP_ID", chip), ("TARGET_OS", os_name), ("PS_MODE", ps),
-        ("构建目标", "craneg_modem_watch" if command != "未确认" else "未确认"),
+        ("构建目标", config.get("buildTarget", "未确认") if config is not None else (command.split()[1] if command.startswith("make ") else "未确认")),
         ("构建命令", command), ("构建来源", source), ("协议", product),
         ("禅道项目", ctx["project_name"]), ("禅道产品", ctx["product_name"]),
         ("project_id", ctx["project_id"] or "未确认"), ("product_id", ctx["product_id"] or "未确认"),
@@ -141,20 +189,35 @@ def main() -> int:
     parser.add_argument("--repo", default=".")
     parser.add_argument("--write", action="store_true")
     parser.add_argument("--prepare", action="store_true", help="Restore the recorded configuration and render current context")
+    parser.add_argument("--refresh-view", action="store_true", help="Refresh generated views using a controller receipt; never prepare configuration")
+    parser.add_argument("--configuration-receipt", type=Path, help="Successful asr3602_build_profile preflight JSON for --refresh-view")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--force", action="store_true", help="Compatibility option; project-owned instructions are preserved")
     parser.add_argument("--no-exclude", action="store_true")
     args = parser.parse_args()
+    if args.refresh_view and (not args.configuration_receipt or args.prepare or args.write or args.check):
+        parser.error("--refresh-view requires --configuration-receipt and cannot combine with --prepare, --write, or --check")
+    if args.configuration_receipt and not args.refresh_view:
+        parser.error("--configuration-receipt requires --refresh-view")
     repo = Path(args.repo).resolve()
-    write = (args.write or args.prepare) and not (args.dry_run or args.check)
-    if write and not args.no_exclude:
+    write = (args.write or args.prepare or args.refresh_view) and not (args.dry_run or args.check)
+    if write and not args.no_exclude and not args.refresh_view:
         update_exclude(repo)
     try:
-        config = prepare(repo, write=write)
+        config = configuration_from_receipt(repo, args.configuration_receipt) if args.refresh_view else prepare(repo, write=write)
     except (ValueError, OSError, RuntimeError) as exc:
-        config = {"status": "NEEDS_CONFIGURATION", "error": str(exc)}
+        if args.refresh_view:
+            print(json.dumps({"configuration": {"status": "STALE_RECEIPT", "error": str(exc)}, "written": []}, ensure_ascii=False))
+            return 2
+        config = {"status": "BUILD_INPUT_REVIEW_REQUIRED" if isinstance(exc, BuildInputsChanged) else "NEEDS_CONFIGURATION", "error": str(exc)}
+    if config["status"] == "REFRESH_SKIPPED_UNBOUND":
+        if args.json:
+            print(json.dumps({"configuration": config, "written": []}, ensure_ascii=False))
+        else:
+            print(f"configuration={config['status']}\nwritten=none\n{config['error']}")
+        return 0
     info = gather(repo)
     files = render_files(info, config)
     if args.check:

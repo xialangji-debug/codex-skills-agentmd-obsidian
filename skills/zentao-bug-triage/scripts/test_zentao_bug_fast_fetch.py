@@ -28,7 +28,7 @@ class SnapshotCommandTests(unittest.TestCase):
         self.assertIn("--detail-limit", command)
         self.assertIn("--no-download-attachments", command)
         self.assertIn("--no-work-md", command)
-        self.assertIn("--no-memory-link", command)
+        self.assertNotIn("--no-memory-link", command)
         self.assertNotIn("--download-attachments", command)
 
     @mock.patch.object(fast_fetch.shutil, "which", return_value="node")
@@ -46,6 +46,14 @@ class SnapshotCommandTests(unittest.TestCase):
         )
         self.assertEqual(command[command.index("--ids") + 1], "4045")
         self.assertIn("--download-attachments", command)
+
+    @mock.patch.object(fast_fetch.shutil, "which", return_value="node")
+    def test_explicit_skip_and_history_refresh_do_not_lookup_candidates(self, _which: mock.Mock) -> None:
+        skipped = fast_fetch.snapshot_command(Path("C:/repo"), LIVE, "active", 80, 4, memory_link=False)
+        history = fast_fetch.snapshot_command(Path("C:/repo"), LIVE, "all", 80, 4, bug_ids="4045", status_refresh=True)
+        self.assertIn("--no-memory-link", skipped)
+        self.assertIn("--no-memory-link", history)
+        self.assertIn("--no-download-attachments", history)
 
 
 class SnapshotValidationTests(unittest.TestCase):

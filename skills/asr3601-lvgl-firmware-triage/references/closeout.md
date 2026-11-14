@@ -4,6 +4,10 @@ Use for a follow-up on an established Bug: completion status, verification
 instructions, or explicitly requested re-verification. Diagnosis belongs to the
 normal triage path; validation-debt aggregation belongs to memory reporting.
 
+For a user's test result or deferral, use `obsidian-fix-pattern-memory` User Test
+Feedback directly with the existing receipt. No fresh Git snapshot or build is
+needed just to record what the user observed on that delivered target.
+
 Reuse the Bug receipt's identity, changed files, verification, commit state,
 memory target, and remaining device/platform debt. Compare current HEAD and dirty
 state once. If they still match, report the existing result and run only the

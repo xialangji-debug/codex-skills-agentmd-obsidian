@@ -11,7 +11,9 @@ param(
     [switch]$NoFlash,
     [switch]$CleanTargetOutput,
     [switch]$RequireFreshPackage,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [ValidateRange(1, 3600)]
+    [int]$FlashTimeoutSec = 900
 )
 
 Set-StrictMode -Version Latest
@@ -309,22 +311,14 @@ if ((Get-Sha256Hex -PathValue $packagePath) -ne $packageSha256) {
 & python -X utf8 $profileScript preflight --profile normal-test --repo $repoPath --adapter $BuildProfileAdapter | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "normal-test preflight changed after build; flashing blocked" }
 
-$expectedChip = ""
-$expectedChip = [string]$adapter.chipId
-$preflight = Join-Path $PSScriptRoot "embedded_target_preflight.ps1"
-if (-not (Test-Path -LiteralPath $preflight)) { throw "Embedded target preflight not found: $preflight" }
-$preflightArgs = @("-ExpectedFamily", "ASR", "-ExpectedChip", $expectedChip, "-ProjectDir", $repoPath, "-Package", $packagePath)
-if (-not [string]::IsNullOrWhiteSpace($Port)) { $preflightArgs += @("-Port", $Port) }
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $preflight @preflightArgs
-if ($LASTEXITCODE -ne 0) { throw "Embedded target preflight blocked flashing" }
-
 $downloadTool = Resolve-Adownload -RepoPath $repoPath -ExplicitPath $Adownload
-$downloadArgs = @()
+$flashBridge = Join-Path $PSScriptRoot "flash_verified_package.py"
+if (-not (Test-Path -LiteralPath $flashBridge -PathType Leaf)) { throw "Verified flash bridge not found: $flashBridge" }
+$flashArgs = @("-X", "utf8", $flashBridge, "--package", $packagePath, "--sha256", $packageSha256, "--adownload", $downloadTool, "--timeout-sec", [string]$FlashTimeoutSec, "--result-file", "$ManifestOut.flash.json")
 if (-not [string]::IsNullOrWhiteSpace($Port)) {
-    $downloadArgs += @("-p", $Port)
-} else {
-    $downloadArgs += "-u"
+    $flashArgs += @("--port", $Port)
 }
-$downloadArgs += @("-a", "-s", "115200", "-r", "-q", $packagePath)
-Invoke-Checked -FilePath $downloadTool -Arguments $downloadArgs
-Write-Host "Flash completed."
+# The bridge selects and pins the live transport; the owner revalidates it and
+# enforces package/process gates. Neither path retries or kills by process name.
+Invoke-Checked -FilePath "python" -Arguments $flashArgs
+Write-Host "Flash writing completed. Startup and device/function acceptance are separate; see $ManifestOut.flash.json."

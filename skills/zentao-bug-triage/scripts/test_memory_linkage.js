@@ -7,6 +7,9 @@ const path = require("path");
 const { enrichBugsWithMemory } = require("./memory_linkage");
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "zentao-memory-linkage-"));
+const activeProjects = path.join(root, "active-projects.json");
+fs.writeFileSync(activeProjects, JSON.stringify({ projects: [] }));
+const options = { root, activeProjects };
 
 function writeNote(name, content) {
   fs.writeFileSync(path.join(root, name), content, "utf8");
@@ -111,10 +114,10 @@ function bug(overrides = {}) {
   };
 }
 
-const high = enrichBugsWithMemory([bug()], ctx, { root }).bugs[0];
-assert.strictEqual(high.memoryMatch.level, "高");
-assert.strictEqual(high.repairEligibility.label, "可直接修复候选");
-assert.strictEqual(high.repairEligibility.directCandidate, true);
+const high = enrichBugsWithMemory([bug()], ctx, options).bugs[0];
+assert.strictEqual(high.memoryMatch.level, "中");
+assert.strictEqual(high.repairEligibility.label, "修复候选-待源码核实");
+assert.strictEqual(high.repairEligibility.directCandidate, false);
 
 const portable = enrichBugsWithMemory([bug({
   id: "1002",
@@ -122,9 +125,9 @@ const portable = enrichBugsWithMemory([bug({
   steps: "下发多个联系人和白名单",
   expected: "联系人数量达到上限后应该正确提示",
   actual: "联系人列表显示错误",
-})], { repo: "/workspace/another", repoName: "another", branch: "customer" }, { root }).bugs[0];
+})], { repo: "/workspace/another", repoName: "another", branch: "customer" }, options).bugs[0];
 assert.strictEqual(portable.memoryMatch.level, "中");
-assert.strictEqual(portable.repairEligibility.label, "可移植候选");
+assert.strictEqual(portable.repairEligibility.label, "修复候选-待源码核实");
 assert.strictEqual(portable.repairEligibility.directCandidate, false);
 
 const miss = enrichBugsWithMemory([bug({
@@ -133,7 +136,7 @@ const miss = enrichBugsWithMemory([bug({
   steps: "进入蓝牙页面刷新",
   expected: "应该显示附近设备",
   actual: "列表为空",
-})], ctx, { root }).bugs[0];
+})], ctx, options).bugs[0];
 assert.strictEqual(miss.memoryMatch.level, "未命中");
 assert.strictEqual(miss.repairEligibility.label, "需先查代码");
 
@@ -144,7 +147,7 @@ const productOnly = enrichBugsWithMemory([bug({
   expected: "",
   actual: "",
   product: "示例_小程序物卡公版",
-})], ctx, { root }).bugs[0];
+})], ctx, options).bugs[0];
 assert.strictEqual(productOnly.memoryMatch.level, "未命中");
 assert.strictEqual(productOnly.memoryMatch.score, 0);
 assert.strictEqual(productOnly.bugFingerprint.hasIssueEvidence, false);
@@ -157,7 +160,7 @@ const unrelatedSameProduct = enrichBugsWithMemory([bug({
   expected: "手表拒接并自动挂断",
   actual: "小程序一直在拨打状态",
   product: "示例_小程序物卡公版",
-})], ctx, { root }).bugs[0];
+})], ctx, options).bugs[0];
 assert.strictEqual(unrelatedSameProduct.memoryMatch.level, "未命中");
 
 const numericFragment = enrichBugsWithMemory([bug({
@@ -166,11 +169,11 @@ const numericFragment = enrichBugsWithMemory([bug({
   steps: "观察电量变化",
   expected: "电量曲线稳定",
   actual: "电量回落",
-})], ctx, { root }).bugs[0];
+})], ctx, options).bugs[0];
 assert.ok(!numericFragment.bugFingerprint.codeTokens.includes("_1657"));
 
-const reactivated = enrichBugsWithMemory([bug({ reactivated: true })], ctx, { root }).bugs[0];
-assert.strictEqual(reactivated.memoryMatch.level, "高");
+const reactivated = enrichBugsWithMemory([bug({ reactivated: true })], ctx, options).bugs[0];
+assert.strictEqual(reactivated.memoryMatch.level, "中");
 assert.strictEqual(reactivated.repairEligibility.label, "复测激活-需重新定位");
 assert.strictEqual(reactivated.repairEligibility.directCandidate, false);
 

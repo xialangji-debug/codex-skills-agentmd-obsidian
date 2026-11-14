@@ -8,6 +8,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 MODULE_PATH = Path(__file__).with_name("fix_memory.py")
@@ -38,6 +39,126 @@ def context(target_id: str, branch: str, verification: str, updated: str) -> dic
 
 
 class FixMemoryTests(unittest.TestCase):
+    def write_feedback_fixture(self, root: Path) -> tuple[Path, dict]:
+        note = root / "sample.md"
+        state = fix_memory.empty_state("FP-TEST")
+        state["targets"] = [
+            context("target-delivered", "release", "build_passed", "2026-08-01T10:00:00+08:00"),
+            context("target-other", "next", "build_passed", "2026-08-02T10:00:00+08:00"),
+        ]
+        state["targets"][0]["zentao"] = "resolved"
+        text = fix_memory.finalize_note(fix_memory.note_template("Sample", "FP-TEST"), state)
+        note.write_text(text, encoding="utf-8")
+        return note, fix_memory.decode_state(text)
+
+    def feedback_args(self, root: Path, note: Path, event: str, target_id: str = "target-delivered") -> argparse.Namespace:
+        return fix_memory.build_parser().parse_args([
+            "event", "--root", str(root), "--note", str(note),
+            "--target-id", target_id, "--event", event,
+            "--evidence", "User observation on the delivered package", "--write",
+        ])
+
+    def test_local_regression_uses_receipt_target_and_preserves_remote_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            note, before = self.write_feedback_fixture(root)
+            args = self.feedback_args(root, note, "regression_observed")
+            with patch.object(fix_memory, "target_context", side_effect=AssertionError("must reuse receipt")):
+                fix_memory.command_event(args)
+            after = fix_memory.decode_state(note.read_text(encoding="utf-8"))
+            target = after["targets"][0]
+            self.assertEqual(target["implementation"], "failed")
+            self.assertEqual(target["verification"], "needs_review")
+            self.assertEqual(target["zentao"], "resolved")
+            self.assertEqual(target["branch"], "release")
+            self.assertIn(before["targets"][0]["evidence"], target["evidence"])
+            self.assertIn(args.evidence, target["evidence"])
+            self.assertEqual(after["targets"][1], before["targets"][1])
+            self.assertEqual(len(after["targets"]), 2)
+
+    def test_partial_observation_preserves_state_and_reference(self) -> None:
+        for batch in [False, True]:
+            with self.subTest(batch=batch), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                note, before = self.write_feedback_fixture(root)
+                if batch:
+                    events = root / "events.json"
+                    events.write_text(json.dumps({"events": [{
+                        "event": "observation", "target_id": "target-delivered", "bug_id": "1001",
+                        "evidence": "Boot works; defer functional retest",
+                    }]}), encoding="utf-8")
+                    fix_memory.command_apply_events(argparse.Namespace(root=str(root), events=events, write=True))
+                else:
+                    fix_memory.command_event(self.feedback_args(root, note, "observation"))
+                after = fix_memory.decode_state(note.read_text(encoding="utf-8"))
+                for key in ["implementation", "verification", "zentao", "relation", "branch", "commit"]:
+                    self.assertEqual(after["targets"][0][key], before["targets"][0][key])
+                self.assertEqual(after["reference_target"], before["reference_target"])
+                self.assertEqual(after["targets"][1], before["targets"][1])
+                self.assertIn(before["targets"][0]["evidence"], after["targets"][0]["evidence"])
+
+    def test_specific_device_check_does_not_claim_qa_or_change_zentao(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            note, before = self.write_feedback_fixture(root)
+            fix_memory.command_event(self.feedback_args(root, note, "device_verified"))
+            target = fix_memory.decode_state(note.read_text(encoding="utf-8"))["targets"][0]
+            self.assertEqual(target["verification"], "device_verified")
+            self.assertEqual(target["implementation"], "applied")
+            self.assertEqual(target["zentao"], "resolved")
+
+    def test_mixed_feedback_batch_matches_sequential_reference_selection(self) -> None:
+        references = []
+        for batch in [False, True]:
+            with self.subTest(batch=batch), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                note = root / "sample.md"
+                state = fix_memory.empty_state("FP-TEST")
+                state["targets"] = [
+                    context("target-a", "main", "qa_verified", "2026-08-03T10:00:00+08:00"),
+                    context("target-b", "newer", "device_verified", "2026-08-02T10:00:00+08:00"),
+                    context("target-c", "older", "device_verified", "2026-08-01T10:00:00+08:00"),
+                ]
+                note.write_text(fix_memory.finalize_note(fix_memory.note_template("Sample", "FP-TEST"), state), encoding="utf-8")
+                sequence = [("target-a", "regression_observed"), ("target-c", "observation")]
+                if batch:
+                    events = root / "events.json"
+                    events.write_text(json.dumps({"events": [
+                        {"event": event, "target_id": target_id, "bug_id": "1001", "evidence": "User feedback"}
+                        for target_id, event in sequence
+                    ]}), encoding="utf-8")
+                    fix_memory.command_apply_events(argparse.Namespace(root=str(root), events=events, write=True))
+                else:
+                    for target_id, event in sequence:
+                        fix_memory.command_event(self.feedback_args(root, note, event, target_id))
+                after = fix_memory.decode_state(note.read_text(encoding="utf-8"))
+                references.append(after["reference_target"])
+                self.assertEqual(after["reference_target"], "target-b")
+                self.assertEqual(after["last_reference_target"], "target-a")
+                self.assertEqual(after["targets"][2]["relation"], "applied")
+        self.assertEqual(references[0], references[1])
+
+    def test_unknown_receipt_target_leaves_note_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            note, _ = self.write_feedback_fixture(root)
+            original = note.read_bytes()
+            with self.assertRaises(SystemExit):
+                fix_memory.command_event(self.feedback_args(root, note, "regression_observed", "missing"))
+            self.assertEqual(note.read_bytes(), original)
+
+    def test_feedback_cannot_create_a_new_target_from_current_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            note, _ = self.write_feedback_fixture(root)
+            original = note.read_bytes()
+            for event in ["observation", "regression_observed"]:
+                args = self.feedback_args(root, note, event, "")
+                with self.subTest(event=event), patch.object(fix_memory, "target_context", return_value={"target_id": "unknown-checkout"}):
+                    with self.assertRaises(SystemExit):
+                        fix_memory.command_event(args)
+                self.assertEqual(note.read_bytes(), original)
+
     def write_registry(self, root: Path) -> Path:
         registry = root / "active-projects.json"
         registry.write_text(
@@ -97,6 +218,20 @@ class FixMemoryTests(unittest.TestCase):
         fix_memory.choose_reference(state)
         self.assertEqual(state["reference_target"], "target-old")
         self.assertEqual(state["last_reference_target"], "target-new")
+
+    def test_local_regression_reselects_reference_without_reopening_bug(self) -> None:
+        state = fix_memory.empty_state("FP-TEST")
+        failed = context("target-new", "next", "qa_verified", "2026-08-03T10:00:00+08:00")
+        failed["zentao"] = "closed"
+        fallback = context("target-old", "release", "device_verified", "2026-08-01T10:00:00+08:00")
+        state["targets"] = [failed, fallback]
+        fix_memory.choose_reference(state)
+        fix_memory.apply_event_to_target(failed, {"event": "regression_observed", "evidence": "same crash recurred"})
+        fix_memory.choose_reference(state)
+        self.assertEqual(state["reference_target"], "target-old")
+        self.assertEqual(failed["zentao"], "closed")
+        self.assertEqual(failed["verification"], "needs_review")
+        self.assertEqual(fallback["verification"], "device_verified")
 
     def test_apply_events_requires_exact_target_and_bug(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

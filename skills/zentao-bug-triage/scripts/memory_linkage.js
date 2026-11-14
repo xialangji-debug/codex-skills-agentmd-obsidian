@@ -2,6 +2,37 @@
 
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
+
+const VERIFICATION_RANK = { unverified: 0, static_checked: 1, build_passed: 2, device_verified: 3, platform_verified: 4, qa_verified: 5 };
+
+function loadProjects(filePath) {
+  const registry = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  if (!Array.isArray(registry.projects)) throw new Error("Invalid active-projects registry");
+  return registry.projects.filter((item) => item.enabled !== false && item.family === "asr360x");
+}
+
+function sourceTargets(note, projects) {
+  return note.managedTargets.filter((target) =>
+    projects.some((project) => normalize(project.project_key) === normalize(target.project_key)) &&
+    ["applied", "committed"].includes(target.implementation) &&
+    ["applied", "reference"].includes(target.relation) &&
+    Object.hasOwn(VERIFICATION_RANK, target.verification) &&
+    target.zentao !== "reactivated"
+  ).map((target) => ({
+    project: target.project_key,
+    repo: projects.find((project) => normalize(project.project_key) === normalize(target.project_key)).path,
+    branch: target.branch || "",
+    version: target.version || "",
+    commit: target.commit || "",
+    implementation: target.implementation,
+    verification: target.verification,
+    targetId: target.target_id,
+    updatedAt: target.updated_at || "",
+    // An applied row can point to HEAD before the uncommitted fix.
+    location: target.implementation === "committed" ? "recorded_commit" : "working_tree_requires_review",
+  })).sort((a, b) => VERIFICATION_RANK[b.verification] - VERIFICATION_RANK[a.verification] || b.updatedAt.localeCompare(a.updatedAt));
+}
 
 const ISSUE_DOMAIN_TERMS = [
   "云相册", "联系人", "白名单", "通讯录", "微聊", "微信支付", "扫码", "定位", "gps",
@@ -52,6 +83,10 @@ function isContextOnlyTerm(term, ctx = {}) {
 }
 
 function meaningfulIssueText(bug) {
+  const activation = normalize([
+    bug.lastActivation?.note, bug.lastActivation?.actual, bug.lastActivation?.expected,
+  ].join("\n"));
+  if (bug.reactivated && activation) return activation;
   const title = normalize(bug.title).replace(/^(?:测试完成|验证完成|已完成|完成)$/, "");
   const detail = normalize([
     bug.steps, bug.actual, bug.expected,
@@ -100,10 +135,15 @@ function decodeManagedState(markdown) {
 function parseNote(filePath, root) {
   const markdown = fs.readFileSync(filePath, "utf8");
   const managed = decodeManagedState(markdown);
+  if (markdown.includes("codex-fix-state-json:") && (!managed || !Array.isArray(managed.targets))) {
+    throw new Error("Invalid managed fix state; do not fall back to legacy verification text");
+  }
+  const frontmatter = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] || "";
+  const domainField = frontmatter.match(/^domains:[ \t]*([^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*)/m);
   const title = (markdown.match(/^#\s+(.+)$/m) || [])[1]?.trim() || path.basename(filePath, ".md");
   const applicable = readSection(markdown, ["Applicable", "适用范围", "适用项目", "项目与版本"]);
   const symptoms = readSection(markdown, ["Symptoms", "症状", "现象"]);
-  const keyFiles = readSection(markdown, ["Key Files", "关键文件", "相关文件"]);
+  const keyFiles = readSection(markdown, ["Key Files", "关键文件", "关键文件和函数", "相关文件"]);
   const keywords = extractExplicitKeywords(markdown);
   return {
     title,
@@ -114,9 +154,12 @@ function parseNote(filePath, root) {
     applicable: normalize(applicable),
     keywords,
     terms: unique(extractTerms(`${title}\n${keywords.join("\n")}\n${symptoms}`)),
-    codeTokens: unique((`${keyFiles}\n${markdown}`.match(/[A-Za-z][A-Za-z0-9_]{3,}/g) || []).map(normalize)),
     searchable: normalize(`${title}\n${keywords.join("\n")}\n${applicable}\n${symptoms}\n${keyFiles}`),
     managedTargets: managed?.targets || [],
+    managed: Boolean(managed),
+    retired: /^lifecycle:\s*["']?(?:deprecated|archived)\b/im.test(markdown),
+    outsideAsr: Boolean(domainField && !/\basr\b/.test(domainField[1])),
+    codeTokens: unique((keyFiles.match(/[A-Za-z][A-Za-z0-9_]{3,}/g) || []).map(normalize)),
   };
 }
 
@@ -137,9 +180,17 @@ function listMarkdownFiles(root) {
 function loadMemoryIndex(root) {
   const errors = [];
   const notes = [];
-  for (const filePath of listMarkdownFiles(root)) {
+  let files = [];
+  try {
+    if (!root || !fs.statSync(root).isDirectory()) throw new Error("Fix-pattern directory unavailable");
+    files = listMarkdownFiles(root);
+  } catch (error) {
+    errors.push({ path: root, error: error.message });
+  }
+  for (const filePath of files) {
     try {
-      notes.push(parseNote(filePath, root));
+      const note = parseNote(filePath, root);
+      if (!note.retired && !note.outsideAsr) notes.push(note);
     } catch (error) {
       errors.push({ path: filePath, error: error.message });
     }
@@ -150,8 +201,7 @@ function loadMemoryIndex(root) {
 function buildBugFingerprint(bug) {
   const text = meaningfulIssueText(bug);
   const codeTokens = unique((text.match(/[a-z][a-z0-9_]{3,}/g) || [])
-    .filter((term) => /_|event|msg|handler|callback|lv_|gps|sim|nv_|task|func|camera|album/.test(term))
-    .filter((term) => !isContextOnlyTerm(term)));
+    .filter((term) => !isContextOnlyTerm(term) && !ISSUE_DOMAIN_TERMS.includes(term)));
   const domainTerms = ISSUE_DOMAIN_TERMS.filter((term) => text.includes(term));
   return {
     text,
@@ -243,6 +293,9 @@ function matchBugToMemory(bug, notes, ctx) {
       strongIssueEvidence: scored.strongIssueEvidence,
       codeHits: scored.codeHits,
       reasons: scored.reasons,
+      sources: note.sources || [],
+      applicability: "unassessed",
+      evidenceLevel: note.sources?.[0]?.verification || "legacy_unassessed",
     };
   }).filter((item) => item.score >= 3 && item.strongIssueEvidence)
     .sort((a, b) => b.score - a.score || Number(b.verified) - Number(a.verified))
@@ -270,16 +323,10 @@ function evidenceExists(bug) {
   return [...(bug.attachmentLinks || []), ...(bug.attachments || [])].length > 0;
 }
 
-function expectationIsClear(bug) {
-  const text = normalize(`${bug.expected || ""}\n${bug.lastActivation?.expected || ""}`);
-  return text.length >= 4 || /应该|需要|改成|换成|去掉|不能|显示为|提示/.test(`${bug.title || ""}\n${bug.steps || ""}`);
-}
-
 function assessRepairEligibility(bug) {
   const checks = ["核对当前分支实现", "检查 git 历史/现有改动", "按 bug 复现步骤验证"];
   const status = normalize(bug.status);
   const memory = bug.memoryMatch || { level: "未命中", candidates: [] };
-  const top = memory.candidates?.[0];
 
   if (/已解决|已关闭|resolved|closed/.test(status)) {
     return { label: "本轮不处理", directCandidate: false, reason: "禅道状态已解决或已关闭。", requiredChecks: [] };
@@ -291,7 +338,7 @@ function assessRepairEligibility(bug) {
     return { label: "需底层/硬件处理", directCandidate: false, reason: "需要驱动、硬件、功耗或崩溃证据。", requiredChecks: ["补 CATStudio/dump/硬件版本证据"] };
   }
   if (!bug.detailFetched) {
-    return { label: "需先深抓", directCandidate: false, reason: "当前只有列表摘要，不能据此直接改代码。", requiredChecks: ["用 --ids 深抓完整详情和附件"] };
+    return { label: memory.candidates?.length ? "有修复线索-待核实" : "需先深抓", directCandidate: false, reason: "当前只有列表摘要，不能据此判断根因或可移植性。", requiredChecks: ["用 --ids 深抓完整详情和附件"] };
   }
   if (bug.reactivated) {
     return { label: "复测激活-需重新定位", directCandidate: false, reason: "历史修复已被复测否定，必须以后续激活说明重新定位。", requiredChecks: checks };
@@ -299,16 +346,8 @@ function assessRepairEligibility(bug) {
   if (bug.logsNeeded && !evidenceExists(bug)) {
     return { label: "需日志验证", directCandidate: false, reason: "协议、时序或偶现问题缺关键日志/附件。", requiredChecks: ["补协议包、CATStudio 日志或复现视频"] };
   }
-  if (bug.handlingBucket === "work" && memory.level === "高" && top?.verified && top.sameProject && expectationIsClear(bug)) {
-    return {
-      label: "可直接修复候选",
-      directCandidate: true,
-      reason: "同项目已验证记忆高度命中，且当前 bug 期望明确；仍需通过当前代码和 Git 检查后才能修改。",
-      requiredChecks: checks,
-    };
-  }
-  if (bug.handlingBucket === "work" && ["高", "中"].includes(memory.level)) {
-    return { label: "可移植候选", directCandidate: false, reason: "存在相似修复记忆，但项目、分支或证据不足以直接套用。", requiredChecks: checks };
+  if (bug.handlingBucket === "work" && memory.candidates?.length) {
+    return { label: "修复候选-待源码核实", directCandidate: false, reason: "存在相关修复线索；必须比较来源和目标代码，确认根因、依赖及已有等效实现。", requiredChecks: checks };
   }
   if (bug.handlingBucket === "work") {
     return { label: "需先查代码", directCandidate: false, reason: "可以进入代码排查，但没有足够可靠的已验证记忆。", requiredChecks: checks };
@@ -316,15 +355,33 @@ function assessRepairEligibility(bug) {
   return { label: "需确认信息", directCandidate: false, reason: bug.handlingReason || "现有信息不足。", requiredChecks: [] };
 }
 
-function enrichBugsWithMemory(bugs, ctx, options = {}) {
+function enrichBugsWithMemoryImpl(bugs, ctx, options = {}) {
   const enabled = options.enabled !== false;
   const root = options.root || "";
-  const index = enabled ? loadMemoryIndex(root) : { root, notes: [], errors: [] };
+  const index = { root, notes: [], errors: [] };
+  let projects = [];
+  if (enabled) {
+    try {
+      projects = loadProjects(options.activeProjects || path.join(os.homedir(), ".codex", "active-projects.json"));
+      const loaded = loadMemoryIndex(root);
+      index.errors.push(...loaded.errors);
+      index.notes = loaded.notes.flatMap((note) => {
+        const sources = sourceTargets(note, projects);
+        // Managed notes without an eligible ASR source cannot recommend a port.
+        if (note.managed && !sources.length) return [];
+        const verification = note.managed ? (VERIFICATION_RANK[sources[0].verification] >= 3 ? "verified" : "unverified") : "unknown";
+        return [{ ...note, sources, verification }];
+      });
+    } catch (error) {
+      index.errors.push({ error: error.message });
+    }
+  }
   const enriched = bugs.map((bug) => {
-    const result = enabled ? matchBugToMemory(bug, index.notes, ctx) : {
+    let result = enabled ? matchBugToMemory(bug, index.notes, ctx) : {
       fingerprint: buildBugFingerprint(bug),
       match: { level: "未启用", score: 0, reasons: [], candidates: [] },
     };
+    if (index.errors.length && !result.match.candidates.length) result.match.level = "检索未完成";
     const withMemory = { ...bug, bugFingerprint: result.fingerprint, memoryMatch: result.match };
     return { ...withMemory, repairEligibility: assessRepairEligibility(withMemory) };
   });
@@ -339,8 +396,28 @@ function enrichBugsWithMemory(bugs, ctx, options = {}) {
       indexErrors: index.errors,
       counts,
       directCandidates: enriched.filter((bug) => bug.repairEligibility.directCandidate).length,
+      candidateBugs: enriched.filter((bug) => bug.memoryMatch.candidates.length).length,
+      status: !enabled ? "disabled" : index.errors.length ? "incomplete" : "complete",
+      projects: projects.map((project) => ({ project_key: project.project_key, path: project.path })),
     },
   };
+}
+
+function enrichBugsWithMemory(bugs, ctx, options = {}) {
+  try {
+    return enrichBugsWithMemoryImpl(bugs, ctx, options);
+  } catch (error) {
+    // Candidate discovery is supplementary: preserve all successfully fetched rows.
+    return {
+      bugs: bugs.map((bug) => ({ ...bug,
+        memoryMatch: { level: "检索未完成", score: 0, reasons: [], candidates: [] },
+        repairEligibility: { label: "候选检索未完成", directCandidate: false, requiredChecks: [] },
+      })),
+      summary: { enabled: true, status: "incomplete", root: options.root || "",
+        indexedNotes: 0, indexErrors: [{ error: error.message }], counts: { 检索未完成: bugs.length },
+        directCandidates: 0, candidateBugs: 0, projects: [] },
+    };
+  }
 }
 
 module.exports = {

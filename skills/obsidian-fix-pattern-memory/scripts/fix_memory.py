@@ -54,6 +54,8 @@ EVENT_UPDATES = {
     "committed": {"implementation": "committed"},
     "device_verified": {"verification": "device_verified"},
     "platform_verified": {"verification": "platform_verified"},
+    "observation": {},
+    "regression_observed": {"implementation": "failed", "verification": "needs_review"},
     "zentao_resolved": {"zentao": "resolved"},
     "zentao_closed": {"zentao": "closed", "verification": "qa_verified"},
     "reactivated_same": {
@@ -64,6 +66,7 @@ EVENT_UPDATES = {
     "not_applicable": {"implementation": "not_applied", "relation": "not_applicable"},
     "superseded": {"implementation": "superseded"},
 }
+FEEDBACK_EVENTS = {"observation", "regression_observed"}
 
 
 def now() -> str:
@@ -524,8 +527,9 @@ def choose_reference(state: dict[str, Any]) -> None:
         target["relation"] = "reference" if target.get("target_id") == selected else "applied"
 
 
-def finalize_note(text: str, state: dict[str, Any]) -> str:
-    choose_reference(state)
+def finalize_note(text: str, state: dict[str, Any], *, reselect_reference: bool = True) -> str:
+    if reselect_reference:
+        choose_reference(state)
     reference = target_by_id(state, state.get("reference_target") or "")
     trust = "verified" if reference and VERIFICATION_RANK.get(reference.get("verification"), 0) >= 40 else "working"
     text = replace_state_block(text, state)
@@ -549,6 +553,13 @@ def resolve_note(args: argparse.Namespace) -> Path:
     if not inside(note, root):
         raise SystemExit(f"Refusing to edit note outside fix-pattern root: {note}")
     return note
+
+
+def event_evidence(target: dict[str, Any], evidence: str, event: str) -> str:
+    previous = target.get("evidence") or ""
+    if event in FEEDBACK_EVENTS and previous:
+        return f"{previous}\n{event}: {evidence}"
+    return evidence
 
 
 def apply_updates(target: dict[str, Any], updates: dict[str, Any], args: argparse.Namespace) -> None:
@@ -576,7 +587,7 @@ def apply_updates(target: dict[str, Any], updates: dict[str, Any], args: argpars
     ]:
         value = compact(getattr(args, arg_name, ""))
         if value:
-            target[key] = value
+            target[key] = event_evidence(target, value, getattr(args, "event", "")) if key == "evidence" else value
     target["updated_at"] = now()
 
 
@@ -643,8 +654,18 @@ def command_event(args: argparse.Namespace) -> int:
     if not note.exists():
         raise SystemExit(f"Fix-pattern note not found: {note}")
     text, state = load_note(note)
-    target = upsert_target(state, target_context(args), EVENT_UPDATES[args.event], args)
-    result = finalize_note(text, state)
+    target_id = compact(getattr(args, "target_id", ""))
+    if target_id:
+        target = target_by_id(state, target_id)
+        if target is None:
+            raise SystemExit(f"Target not found in note: {target_id}")
+        apply_updates(target, EVENT_UPDATES[args.event], args)
+    else:
+        context = target_context(args)
+        if args.event in FEEDBACK_EVENTS and target_by_id(state, context["target_id"]) is None:
+            raise SystemExit("Feedback requires an existing target; reuse --target-id from its receipt")
+        target = upsert_target(state, context, EVENT_UPDATES[args.event], args)
+    result = finalize_note(text, state, reselect_reference=args.event != "observation")
     write_or_preview(note, result, args.write)
     print(f"event={args.event} fix_id={state['fix_id']} target_id={target['target_id']}")
     return 0
@@ -667,7 +688,7 @@ def apply_event_to_target(target: dict[str, Any], event: dict[str, Any]) -> bool
         target[key] = value
     evidence = compact(event.get("evidence"))
     if evidence:
-        target["evidence"] = evidence
+        target["evidence"] = event_evidence(target, evidence, name)
     target["updated_at"] = compact(event.get("observed_at")) or now()
     return True
 
@@ -688,9 +709,11 @@ def command_apply_events(args: argparse.Namespace) -> int:
             for target in state.get("targets", []):
                 if event_target_match(target, event) and apply_event_to_target(target, event):
                     note_changed = True
+                    if event.get("event") != "observation":
+                        choose_reference(state)
                     matched.add(index)
         if note_changed:
-            result = finalize_note(text, state)
+            result = finalize_note(text, state, reselect_reference=False)
             if args.write:
                 atomic_write(note, result)
             changed.append(str(note))
@@ -925,6 +948,7 @@ def build_parser() -> argparse.ArgumentParser:
     event = sub.add_parser("event")
     add_note_arguments(event, creating=False)
     add_context_arguments(event)
+    event.add_argument("--target-id", default="", help="Update this existing receipt target without inferring checkout identity")
     event.add_argument("--event", choices=sorted([*EVENT_UPDATES, "reactivated_variant"]), required=True)
     event.add_argument("--write", action="store_true")
     event.set_defaults(func=command_event)
