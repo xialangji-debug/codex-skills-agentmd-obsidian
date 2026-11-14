@@ -37,18 +37,18 @@
   ],
   "retired_skills": [
     "aa-skill-router",
-    "asr3601-fix-closeout-reporter"
+    "asr3601-fix-closeout-reporter",
+    "asr3601-protocol-branch-matrix",
+    "skill-usage-tracker"
   ],
   "skills": [
     "asr3601-cross-branch-porting",
     "asr3601-lvgl-firmware-triage",
     "asr3601-project-onboard",
-    "asr3601-protocol-branch-matrix",
     "asr3602-local-build-flash",
     "asr360x-bug-delivery-orchestrator",
     "catstudio-log-extractor",
     "obsidian-fix-pattern-memory",
-    "skill-usage-tracker",
     "zentao-bug-resolver",
     "zentao-bug-triage"
   ],

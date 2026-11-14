@@ -13,6 +13,11 @@ Other skills submit evidence or status events through `scripts/fix_memory.py`.
 - `target_id` hashes `repo_id + branch + version + variant_id`.
 - `bug_ids` associates one target application with one or more external Bug IDs.
 
+For feedback on a delivered package, `event --target-id <receipt-target>` updates
+that existing row directly, even after the checkout changes. A missing ID fails
+without writing. Without this option, existing context-based event behavior is
+retained; `observation` and `regression_observed` require a matching existing row.
+
 ## Domain
 
 - `domains: [asr]` and `domains: [esp32]` identify firmware-family memory.
@@ -49,8 +54,16 @@ retain the old ID as `last_reference_target`.
 
 ## Reactivation
 
+- Local user feedback for the same target and symptom: `regression_observed` sets
+  `failed + needs_review`, preserves Zentao state, and reselects the reference if
+  necessary. It records a local recurrence, not a remote Bug transition.
+- Partial test results or deferral: `observation` records evidence without changing
+  implementation, verification, or Zentao state or reselecting the reference.
+  Both local feedback events append their observation to existing evidence;
+  tested scope belongs in that evidence.
 - Same target and materially same symptom: `reactivated_same`; mark that target
-  `failed + needs_review`.
+  `failed + needs_review` and Zentao `reactivated` only after that remote status is
+  actually established.
 - Different target or materially changed symptom: `reactivated_variant`; retain
   the old target state and require code review before linking a new target.
 - Missing from an active list is never evidence. Read the detail status first.

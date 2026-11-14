@@ -1,4 +1,4 @@
 interface:
   display_name: "ASR3601 LVGL Firmware Triage"
-  short_description: "由主 Codex 快速排查修复360x固件问题并审计功能闭包"
-  default_prompt: "Use $asr3601-lvgl-firmware-triage to perform a direct primary-Codex fast fix, investigate current-branch firmware behavior, audit feature closure, or implement a scoped LVGL UI."
+  short_description: "排查修复360x固件、检查功能闭包，也可独立导入协议和核对分支支持"
+  default_prompt: "Use $asr3601-lvgl-firmware-triage to investigate or fix current-branch firmware behavior, audit feature closure, implement a scoped LVGL UI, or independently import protocol documents and compare branch support."

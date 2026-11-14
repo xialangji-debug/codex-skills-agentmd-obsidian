@@ -139,7 +139,7 @@ Codex 原生扩展点：
 <summary>当前公开 Skills</summary>
 
 <!-- BEGIN PUBLIC SKILLS -->
-`asr3601-cross-branch-porting`, `asr3601-lvgl-firmware-triage`, `asr3601-project-onboard`, `asr3601-protocol-branch-matrix`, `asr3602-local-build-flash`, `asr360x-bug-delivery-orchestrator`, `catstudio-log-extractor`, `obsidian-fix-pattern-memory`, `skill-usage-tracker`, `zentao-bug-resolver`, `zentao-bug-triage`。
+`asr3601-cross-branch-porting`, `asr3601-lvgl-firmware-triage`, `asr3601-project-onboard`, `asr3602-local-build-flash`, `asr360x-bug-delivery-orchestrator`, `catstudio-log-extractor`, `obsidian-fix-pattern-memory`, `zentao-bug-resolver`, `zentao-bug-triage`。
 <!-- END PUBLIC SKILLS -->
 
 </details>
@@ -208,3 +208,5 @@ Maintainer：xiakezhen
 需求、规则、风险决策和最终验证：xiakezhen
 
 代码与文档辅助：OpenAI Codex
+
+公开清单已退役独立的 `asr3601-protocol-branch-matrix` 和 `skill-usage-tracker` Skill；注册审计工具及其回归测试保留在 `scripts/skill-maintenance/`，用于验证安装后的公开路由。协议任务由现有 firmware triage Skill 承接。

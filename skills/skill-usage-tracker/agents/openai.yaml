@@ -1,4 +1,0 @@
-interface:
-  display_name: "Skill Usage & Registry Auditor"
-  short_description: "增量统计真实Skill使用并审计路由和失效索引"
-  default_prompt: "Use $skill-usage-tracker for the requested registry audit or usage report; query existing evidence first and scan only when fresh usage data is needed."

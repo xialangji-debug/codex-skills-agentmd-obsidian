@@ -18,3 +18,15 @@ capture.
    capture-only evidence.
 
 Keep release/readme/fnOS/`yl.h` and watchdog/Dump operations outside this mode.
+
+If CATStudio is already running, pass its exact `existingCaptureSession` receipt,
+including PID, process start, executable path and physical USB identity. The owner
+finalizes only that session before flashing. Ambiguous/unbound sessions or other
+downloaders stop the operation without closing them. An explicitly discarded log
+still requires the exact session binding; it does not authorize a name-wide kill.
+
+Previous capture finalization is reported separately. A failed or cancelled flash
+does not imply that prior capture resumed. Preserve its saved files and session
+receipt; use the existing supervisor's exact-session recovery only within its
+authorized scope. In particular, supervisor `resume` can include reflash and must
+not be used as an implicit generic logger restart.

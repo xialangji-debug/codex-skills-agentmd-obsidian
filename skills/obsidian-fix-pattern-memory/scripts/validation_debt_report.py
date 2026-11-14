@@ -13,6 +13,9 @@ import base64
 import hashlib
 import json
 import re
+import subprocess
+from datetime import datetime
+from fnmatch import fnmatchcase
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,6 +38,7 @@ FIELD_RES = {
     ),
 }
 MANAGED_STATE_RE = re.compile(r"<!--\s*codex-fix-state-json:\s*([A-Za-z0-9_=-]+)\s*-->")
+DEFAULT_POLICY = Path(__file__).resolve().parent.parent / "references" / "validation-policy.json"
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,79 @@ class Debt:
     target_id: str = ""
     updated_at: str = ""
     legacy: bool = False
+    fix_id: str = ""
+    validation_scope: str = "unknown"
+
+    @property
+    def work_item_id(self) -> str:
+        # A target describes a product/version, not a unique root cause.
+        identity = [self.fix_id or self.source.name, self.target_id or "legacy"]
+        payload = json.dumps(identity, ensure_ascii=False, separators=(",", ":"))
+        return "v2-" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def frontmatter_values(text: str, key: str) -> list[str]:
+    match = re.match(r"\A---\r?\n(.*?)\r?\n---", text, re.S)
+    if not match:
+        return []
+    field = re.search(rf"^{re.escape(key)}:[ \t]*(.*)$", match.group(1), re.M)
+    if not field:
+        return []
+    value = field.group(1).strip()
+    if value:
+        return [v.strip().strip("'\"") for v in value.strip("[]").split(",") if v.strip()]
+    values = []
+    for line in match.group(1)[field.end():].splitlines():
+        item = re.match(r"^\s+-\s*(.+?)\s*$", line)
+        if item:
+            values.append(item.group(1).strip().strip("'\""))
+        elif line.strip() and not line.startswith((" ", "\t")):
+            break
+    return values
+
+
+def load_validation_policy(path: Path = DEFAULT_POLICY) -> dict:
+    policy = json.loads(path.read_text(encoding="utf-8-sig"))
+    kinds = {"firmware", "tool", "document", "platform", "unknown"}
+    if (set(policy) != {"schema_version", "default", "rules"} or policy["schema_version"] != 1
+            or policy["default"] not in kinds or not isinstance(policy["rules"], list)):
+        raise ValueError(f"Invalid validation policy: {path}")
+    ids = set()
+    for rule in policy["rules"]:
+        if (not isinstance(rule, dict) or set(rule) != {"id", "match", "scope"}
+                or not isinstance(rule["id"], str) or not rule["id"] or rule["id"] in ids
+                or rule["scope"] not in kinds or not isinstance(rule["match"], dict)
+                or not rule["match"]):
+            raise ValueError(f"Invalid or duplicate validation rule: {path}")
+        ids.add(rule["id"])
+        for field, patterns in rule["match"].items():
+            if (field not in {"area", "domains", "scope", "project", "kind"}
+                    or not isinstance(patterns, list) or not patterns
+                    or not all(isinstance(p, str) and p for p in patterns)):
+                raise ValueError(f"Invalid validation selector: {rule['id']}/{field}")
+    return policy
+
+
+def validation_scope_for(text: str, project: str, policy: dict) -> str:
+    fields = {key: frontmatter_values(text, key) for key in ("area", "domains", "scope", "kind")}
+    fields["project"] = [project]
+    for rule in policy["rules"]:
+        if all(any(fnmatchcase(value.casefold(), pattern.casefold())
+                   for value in fields[key] for pattern in patterns)
+               for key, patterns in rule["match"].items()):
+            return rule["scope"]
+    return policy["default"]
+
+
+def nondevice_followup(scope: str, verification: str) -> tuple[tuple[str, ...], str]:
+    checks = {
+        "tool": ("工具功能/集成验收", "按笔记核对工具测试、集成结果及配置生效证据；仅回写实际完成的验证层级"),
+        "document": ("文档结构/链接/内容验收", "核对结构、链接与内容；涉及展示时检查渲染结果"),
+        "platform": ("平台交互验收", "按目标场景核对平台请求、响应和业务闭环证据"),
+        "unknown": ("验收范围待明确", "先核对笔记的实际验证对象及所需证据，不能仅由 domain=none 推断完成"),
+    }
+    pending, action = checks[scope]
+    return (("静态检查", pending) if verification == "unverified" else (pending,)), action
 
 
 def clean_value(value: str) -> str:
@@ -248,7 +325,8 @@ def managed_state(text: str) -> dict | None:
     return state if state.get("schema_version") == 2 else None
 
 
-def managed_debts(path: Path, text: str, state: dict) -> list[Debt]:
+def managed_debts(path: Path, text: str, state: dict, policy: dict | None = None) -> list[Debt]:
+    policy = policy if policy is not None else load_validation_policy()
     title = path.stem
     title_match = re.search(r"^#\s+(.+?)\s*$", text, re.M)
     if title_match:
@@ -262,15 +340,18 @@ def managed_debts(path: Path, text: str, state: dict) -> list[Debt]:
         bug_ids = target.get("bug_ids") or []
         if relation in {"candidate", "not_applicable"} or implementation in {"not_applied", "superseded"}:
             continue
-        if verification == "qa_verified":
+        review_needed = verification == "needs_review" or implementation == "failed" or target.get("zentao") == "reactivated"
+        if verification == "qa_verified" and not review_needed:
             continue
-        if verification in {"device_verified", "platform_verified"} and not bug_ids:
+        if verification in {"device_verified", "platform_verified"} and not bug_ids and not review_needed:
             continue
+
+        scope = validation_scope_for(text, target.get("project_key", ""), policy)
 
         passed: tuple[str, ...]
         pending: tuple[str, ...]
         priority: str
-        if verification == "needs_review" or implementation == "failed" or target.get("zentao") == "reactivated":
+        if review_needed:
             passed = ("历史修复记录",)
             pending = ("重新激活复核",)
             priority = "P0"
@@ -290,11 +371,19 @@ def managed_debts(path: Path, text: str, state: dict) -> list[Debt]:
             pending = ("真机回归",)
             priority = "P1"
             next_action = "按笔记验证方法完成目标版本真机回归并回写证据"
-        else:
+        elif verification in {"device_verified", "platform_verified"}:
             passed = (("平台验证" if verification == "platform_verified" else "真机验证"),)
             pending = ("QA 关闭",)
             priority = "P1"
             next_action = "等待或核对 QA 复测结果；禅道关闭后自动升级精确目标"
+        else:
+            passed = ("未识别的验证状态",)
+            pending = ("验收范围待明确",)
+            priority = "P0"
+            next_action = "核对规范记录的验证状态，未知状态不能推断通过"
+
+        if not review_needed and scope != "firmware" and verification in {"unverified", "static_checked", "build_passed"}:
+            pending, next_action = nondevice_followup(scope, verification)
 
         status = f"implementation={implementation}; verification={verification}; zentao={target.get('zentao', 'unknown')}"
         target_title = f"{title} [{target.get('project_key', 'unknown')} / {target.get('branch', 'unknown')}]"
@@ -315,6 +404,8 @@ def managed_debts(path: Path, text: str, state: dict) -> list[Debt]:
                 variant_id=target.get("variant_id") or "",
                 target_id=target.get("target_id") or "",
                 updated_at=target.get("updated_at") or "",
+                fix_id=state.get("fix_id") or "",
+                validation_scope=scope,
             )
         )
     return debts
@@ -360,7 +451,8 @@ def history_review_matches(path: Path, state: dict, target: dict, entry: dict | 
             and entry["note_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest())
 
 
-def scan(root: Path, *, include_history: bool = False) -> tuple[list[Debt], int, int]:
+def scan(root: Path, *, include_history: bool = False, policy: dict | None = None) -> tuple[list[Debt], int, int]:
+    policy = policy if policy is not None else load_validation_policy()
     debts: list[Debt] = []
     explicit_count = 0
     files = sorted(root.glob("*.md"), key=lambda path: path.name.lower())
@@ -373,7 +465,7 @@ def scan(root: Path, *, include_history: bool = False) -> tuple[list[Debt], int,
         state = managed_state(text)
         if state and state.get("targets"):
             explicit_count += 1
-            rows = managed_debts(path, text, state)
+            rows = managed_debts(path, text, state, policy)
             by_id = {target["target_id"]: target for target in state["targets"]}
             debts.extend(row for row in rows if not history_review_matches(
                 path, state, by_id[row.target_id], history.get((path.name, row.target_id))))
@@ -408,6 +500,46 @@ def filter_debts(
     ]
 
 
+def current_projects(registry: Path) -> list[dict]:
+    """Read configured work repositories only; a failed Git lookup is visible."""
+    data = json.loads(registry.read_text(encoding="utf-8-sig"))
+    result = []
+    for project in data["projects"]:
+        if not project.get("enabled", True):
+            continue
+        row = {"project": project["project_key"], "path": project["path"], "branch": "", "error": ""}
+        try:
+            proc = subprocess.run(["git", "-C", project["path"], "branch", "--show-current"],
+                                  capture_output=True, text=True, encoding="utf-8", timeout=10)
+            if proc.returncode:
+                row["error"] = "Git lookup failed"
+            elif not proc.stdout.strip():
+                row["error"] = "Detached HEAD; select an exact target explicitly"
+            else:
+                row["branch"] = proc.stdout.strip()
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            row["error"] = type(exc).__name__
+        result.append(row)
+    return result
+
+
+def render_overview(debts: list[Debt], projects: list[dict], history_rows: int) -> str:
+    branches = {p["branch"] for p in projects if p["branch"]}
+    current = [d for d in debts if d.branch in branches and d.validation_scope not in {"tool", "document", "platform"}]
+    tools = [d for d in debts if d.validation_scope in {"tool", "document", "platform"}]
+    current_ids = {d.work_item_id for d in current + tools}
+    other = [d for d in debts if d.work_item_id not in current_ids]
+    lines = ["## 按需生成的工作视图", "", f"生成时间：{datetime.now().astimezone().isoformat(timespec='seconds')}", "",
+             f"- 默认待核对：{len(debts)} 项；当前检出分支相关 {len(current)} 项；工具/文档/平台 {len(tools)} 项；其他分支或范围待明确 {len(other)} 项。",
+             f"- 历史工作项/停用记录排除：{history_rows} 项；排除不代表新增验证通过。",
+             "- 分支匹配仅用于导航，不代表设备当前固件或问题复现；Git 读取失败会明确显示。", "",
+             "| 工程 | 实时分支 | 相关待核对 |", "|---|---|---:|"]
+    for p in projects:
+        count = sum(d.branch == p["branch"] for d in current) if p["branch"] else 0
+        lines.append(f"| {md_cell(p['project'])} | {md_cell(p['branch'] or p['error'])} | {count} |")
+    return "\n".join(lines) + "\n"
+
+
 def campaign_key(debt: Debt) -> str:
     if debt.legacy:
         return f"legacy|{debt.domain}|{debt.source.name}"
@@ -430,8 +562,12 @@ def build_campaigns(debts: list[Debt]) -> list[dict]:
             state = "BLOCKED"
         elif device_pending:
             state = "DEVICE_VERIFICATION_PENDING"
-        else:
+        elif all(row.pending == ("QA 关闭",) for row in rows):
             state = "READY_FOR_QA"
+        elif any(row.validation_scope == "unknown" for row in rows):
+            state = "ACCEPTANCE_SCOPE_PENDING"
+        else:
+            state = "FUNCTIONAL_VERIFICATION_PENDING"
         campaigns.append(
             {
                 "campaign_id": "VC-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:12].upper(),
@@ -442,7 +578,9 @@ def build_campaigns(debts: list[Debt]) -> list[dict]:
                 "variant_id": rows[0].variant_id or None,
                 "legacy": rows[0].legacy,
                 "state": state,
-                "release_blocked": state in {"BLOCKED", "DEVICE_VERIFICATION_PENDING"},
+                "release_blocked": state != "READY_FOR_QA",
+                "validation_scopes": sorted({row.validation_scope for row in rows}),
+                "work_item_ids": [row.work_item_id for row in rows],
                 "priorities": priorities,
                 "passed_gates": passed,
                 "pending": pending,
@@ -553,7 +691,7 @@ def render_open_loops_draft(debts: list[Debt], root: Path) -> str:
         lines.append("- 暂无带显式状态的当前验证债务。")
         return "\n".join(lines) + "\n"
     for debt in debts:
-        debt_id = debt.target_id or debt.source.name
+        debt_id = debt.work_item_id
         lines.extend(
             [
                 f"- [ ] [{debt.priority}] {debt.title} <!-- validation-debt:{debt_id} -->",
@@ -571,10 +709,25 @@ def render_open_loops_draft(debts: list[Debt], root: Path) -> str:
 def render_open_loops_delta(debts: list[Debt], root: Path, existing_text: str) -> str:
     marker_re = re.compile(r"<!--\s*validation-debt:([^>]+?)\s*-->")
     existing_ids = {match.group(1).strip() for match in marker_re.finditer(existing_text)}
-    current = {debt.target_id or debt.source.name: debt for debt in debts}
-    added = sorted(set(current) - existing_ids)
-    still_open = sorted(set(current) & existing_ids)
-    stale = sorted(existing_ids - set(current))
+    current = {debt.work_item_id: debt for debt in debts}
+    if len(current) != len(debts):
+        raise ValueError("Duplicate root-cause/target work identity; refusing a lossy delta")
+    old_keys: dict[str, list[str]] = {}
+    for debt in debts:
+        old_keys.setdefault(debt.target_id or debt.source.name, []).append(debt.work_item_id)
+    matched = set(current) & existing_ids
+    migrations, ambiguous, stale = {}, {}, []
+    for old in sorted(existing_ids - set(current)):
+        candidates = old_keys.get(old, [])
+        if len(candidates) == 1:
+            migrations[old] = candidates[0]
+            matched.add(candidates[0])
+        elif candidates:
+            ambiguous[old] = candidates
+        else:
+            stale.append(old)
+    added = sorted(set(current) - matched)
+    still_open = sorted(matched)
     lines = [
         "# Open Loops 验证债务差异草稿",
         "",
@@ -584,6 +737,9 @@ def render_open_loops_delta(debts: list[Debt], root: Path, existing_text: str) -
         f"- 新增：{len(added)}",
         f"- 仍开放：{len(still_open)}",
         f"- 疑似过期：{len(stale)}",
+        f"- 可唯一迁移的旧标识：{len(migrations)}",
+        f"- 存在歧义的旧标识：{len(ambiguous)}",
+        "> 疑似过期可能由筛选范围变化导致，不代表完成或可删除。旧标识有多个根因时保留全部候选。",
         "",
         "## 新增",
         "",
@@ -595,6 +751,7 @@ def render_open_loops_delta(debts: list[Debt], root: Path, existing_text: str) -
         lines.append(f"- [ ] [{debt.priority}] {debt.title} <!-- validation-debt:{debt_id} -->")
         lines.append(f"  - 下一动作：{debt.next_action}")
         lines.append(f"  - 来源：{debt.source.name}")
+        lines.append(f"  - 根因 / 目标：{debt.fix_id or 'legacy'} / {debt.target_id or 'legacy'}")
     lines.extend(["", "## 仍开放", ""])
     lines.extend(f"- {debt_id}" for debt_id in still_open)
     if not still_open:
@@ -602,6 +759,16 @@ def render_open_loops_delta(debts: list[Debt], root: Path, existing_text: str) -
     lines.extend(["", "## 疑似过期", ""])
     lines.extend(f"- {debt_id}" for debt_id in stale)
     if not stale:
+        lines.append("- 无")
+    lines.extend(["", "## 旧标识迁移建议", ""])
+    lines.extend(f"- `{old}` → `{new}`" for old, new in migrations.items())
+    if not migrations:
+        lines.append("- 无")
+    lines.extend(["", "## 旧标识歧义（需核对原条目来源）", ""])
+    for old, candidates in ambiguous.items():
+        lines.append(f"- `{old}` 对应 {len(candidates)} 项：")
+        lines.extend(f"  - `{key}` — {current[key].source.name}" for key in candidates)
+    if not ambiguous:
         lines.append("- 无")
     return "\n".join(lines) + "\n"
 
@@ -624,6 +791,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--branch", default="", help="Case-insensitive branch substring filter.")
     parser.add_argument("--priority", choices=["", "P0", "P1", "P2"], default="")
     parser.add_argument("--since", default="", help="Managed-target lower date bound in YYYY-MM-DD form.")
+    parser.add_argument("--validation-policy", type=Path, default=DEFAULT_POLICY,
+                        help="Ordered selectors for validation scope; never changes canonical evidence.")
+    parser.add_argument("--active-projects", type=Path, default=Path.home()/".codex"/"active-projects.json")
+    parser.add_argument("--overview", action="store_true", help="Show live branch navigation and debt categories instead of all rows.")
+    parser.add_argument("--current-branches", action="store_true", help="Filter by successfully read current branches; no evidence upgrades.")
     parser.add_argument("--campaign", action="store_true", help="Append grouped validation Campaign output.")
     parser.add_argument("--include-history", action="store_true", help="Include historical work-list decisions and deprecated/archived records without changing evidence states.")
     parser.add_argument("--campaign-json", help="Optional output path for machine-readable Campaign JSON.")
@@ -643,7 +815,8 @@ def main() -> int:
     if bool(args.open_loops) != bool(args.open_loops_delta):
         raise SystemExit("--open-loops and --open-loops-delta must be provided together")
 
-    all_debts, file_count, explicit_count = scan(root, include_history=args.include_history)
+    policy = load_validation_policy(args.validation_policy)
+    all_debts, file_count, explicit_count = scan(root, include_history=args.include_history, policy=policy)
     debts = filter_debts(
         all_debts,
         domain=args.domain,
@@ -652,12 +825,26 @@ def main() -> int:
         priority=args.priority,
         since=args.since,
     )
+    projects = current_projects(args.active_projects) if args.overview or args.current_branches else []
+    if args.current_branches:
+        failures = [p for p in projects if p["error"]]
+        if failures:
+            raise SystemExit("Cannot completely filter current branches: " + "; ".join(p["project"] + ": " + p["error"] for p in failures))
+        branches = {p["branch"] for p in projects}
+        debts = [d for d in debts if d.branch in branches]
     filtered = any([args.domain != "all", args.project, args.branch, args.priority, args.since,
                     not args.include_history and bool(load_history_review(root))])
-    print(render_report(debts, root, file_count, explicit_count, filtered=filtered))
+    filtered = filtered or args.current_branches
+    history_rows = 0
+    if not args.overview:
+        print(render_report(debts, root, file_count, explicit_count, filtered=filtered))
     if not args.include_history:
-        raw_debts, _, _ = scan(root, include_history=True)
-        print(f"\n- 历史工作项/停用记录排除目标行：{len(raw_debts) - len(all_debts)}；不是新增验证通过。")
+        raw_debts, _, _ = scan(root, include_history=True, policy=policy)
+        history_rows = len(raw_debts) - len(all_debts)
+        if not args.overview:
+            print(f"\n- 历史工作项/停用记录排除目标行：{history_rows}；不是新增验证通过。")
+    if args.overview:
+        print(render_overview(debts, projects, history_rows))
 
     campaigns = build_campaigns(debts)
     if args.campaign:

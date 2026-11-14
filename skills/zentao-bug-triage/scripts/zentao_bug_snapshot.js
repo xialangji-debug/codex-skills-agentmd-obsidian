@@ -98,6 +98,7 @@ function parseArgs(argv) {
     writeObsidian: false,
     workMd: true,
     memoryLink: true,
+    activeProjects: path.join(os.homedir(), ".codex", "active-projects.json"),
     fixPatterns: path.join(os.homedir(), "Documents", "Obsidian", "CodexVault", "Codex", "fix-patterns"),
     cleanup: "",
     siteUrl: "",
@@ -143,6 +144,7 @@ function parseArgs(argv) {
     else if (a === "--no-work-md") args.workMd = false;
     else if (a === "--fix-patterns") args.fixPatterns = next();
     else if (a === "--no-memory-link") args.memoryLink = false;
+    else if (a === "--active-projects") args.activeProjects = next();
     else if (a === "--cleanup") args.cleanup = next();
     else if (a === "--site-url") args.siteUrl = next();
     else if (a === "--help" || a === "-h") {
@@ -178,8 +180,10 @@ Defaults:
   --no-work-md is passed. work-items.md contains bugs Codex should inspect/fix.
   ignored-items.md contains platform/low-level/log-needed/unclear issues to skip.
   By default the snapshot reads fix-pattern Markdown notes and adds memory match
-  levels plus conservative repair eligibility. Use --fix-patterns to override the
-  memory folder or --no-memory-link to disable this read-only linkage.
+  clues with source/evidence metadata, including in lightweight list mode. Use
+  --active-projects to override the enabled ASR source registry, --fix-patterns to
+  override the memory folder, or --no-memory-link to skip this read-only lookup.
+  Candidate matching never establishes target applicability or repair permission.
   --cleanup deletes only work-items.md, ignored-items.md, and attachments/.
 `);
       process.exit(0);
@@ -1372,7 +1376,9 @@ function compactAttachmentText(bug) {
 }
 
 function compactHandlingText(bug) {
+  if (!bug.detailFetched) return "待查详情";
   if (bug.handlingBucket !== "work") return "先不动";
+  if (bug.memoryMatch?.candidates?.length) return "核实候选";
   if (bug.handlingAction === "review") return "可查";
   if (/需要日志/.test(bug.canHandle || "")) return "可查";
   return "建议修";
@@ -1391,7 +1397,10 @@ function compactMemoryText(bug) {
   const match = bug.memoryMatch;
   if (!match) return "未评估";
   const top = match.candidates?.[0];
-  return top ? `${match.level}(${match.score})：${compactTitle(top.title)}` : match.level;
+  if (!top) return match.level === "未命中" ? "本次未找到候选" : match.level;
+  const source = top.sources?.[0];
+  const evidence = source ? `${source.project} / ${source.verification}` : "历史线索，来源待核实";
+  return `${compactTitle(top.title)}（${evidence}）`.replace(/\|/g, "/");
 }
 
 function compactEligibilityText(bug) {
@@ -1415,15 +1424,18 @@ function chatSummaryReport(ctx, bugs, snapshotDir) {
   if (ctx.bugStatus) lines.push(`- Bug状态筛选：${ctx.bugStatus}`);
   if (ctx.assignedToFilter) lines.push(`- 指派筛选：${ctx.assignedToFilter === "me" ? "当前账号" : ctx.assignedToFilter}`);
   if (typeof ctx.assignedScanCount === "number") lines.push(`- 指派给我候选：${ctx.assignedScanCount} 个`);
-  lines.push(`- 数量：共 ${bugs.length} 个，候选/可修 ${workCount} 个，先不动 ${ignoredCount} 个`);
+  lines.push(`- 数量：共 ${bugs.length} 个，待排查 ${workCount} 个，暂缓 ${ignoredCount} 个`);
   if (ctx.memory) {
     lines.push(`- 记忆联动：${ctx.memory.enabled ? `索引 ${ctx.memory.indexedNotes} 条；高 ${ctx.memory.counts?.高 || 0} / 中 ${ctx.memory.counts?.中 || 0} / 低 ${ctx.memory.counts?.低 || 0} / 未命中 ${ctx.memory.counts?.未命中 || 0}` : "未启用"}`);
-    lines.push(`- 可直接修复候选：${ctx.memory.directCandidates || 0} 个；仍须先核对当前分支代码和 Git 历史`);
+    if (ctx.memory.enabled) {
+      lines.push(`- 修复线索：${ctx.memory.candidateBugs || 0} 个 Bug；适用性待源码核实，未命中不代表没有可复用修复`);
+      if (ctx.memory.status === "incomplete") lines.push(`- 候选检索未完成：${ctx.memory.indexErrors?.length || 0} 项读取错误；Bug 列表仍可使用`);
+    }
   }
   if (detailFailedCount) lines.push(`- 详情失败：${detailFailedCount} 个，已保留列表摘要；修复前需用 --ids 重试深抓`);
   lines.push(`- 快照：${snapshotDir}`);
   lines.push("");
-  lines.push("| Bug（ID + 标题） | 类型 | 记忆命中 | 修复资格 | 处理建议 | 附件 |");
+  lines.push("| Bug（ID + 标题） | 类型 | 修复候选 | 核实状态 | 处理建议 | 附件 |");
   lines.push("| --- | --- | --- | --- | --- | --- |");
   for (const bug of bugs) {
     lines.push(`| ${bugDisplayLabel(bug)} | ${compactCategory(bug)} | ${compactMemoryText(bug)} | ${compactEligibilityText(bug)} | ${compactHandlingText(bug)} | ${compactAttachmentText(bug)} |`);
@@ -1440,7 +1452,7 @@ function markdownFence(value) {
 }
 
 function oneLine(value) {
-  return (value || "").replace(/\s+/g, " ").trim() || "未记录";
+  return String(value ?? "").replace(/\s+/g, " ").trim() || "未记录";
 }
 
 function currentSectionsForBug(bug) {
@@ -1468,9 +1480,13 @@ function appendMemoryDetails(lines, bug) {
   if (match.candidates?.length) {
     lines.push("- 关联修复记忆：");
     for (const item of match.candidates) {
-      const verified = item.verification === "verified" ? "已验证" : item.verification === "unverified" ? "未验证" : "验证状态未知";
-      lines.push(`  - ${item.title}（${item.score}分，${verified}）：${item.path}`);
+      lines.push(`  - ${item.title}（相关性 ${item.score} 分，适用性待核实）：${item.path}`);
       if (item.reasons?.length) lines.push(`    - 证据：${item.reasons.join("；")}`);
+      if (!item.sources?.length) lines.push("    - 历史文字线索，来源与验证等级待核实。");
+      for (const source of item.sources || []) {
+        const commit = source.location === "recorded_commit" ? `记录提交 ${source.commit || "未记录"}（需核对补丁）` : `未提交改动待核实，记录时 HEAD ${source.commit || "未记录"} 不代表修复提交`;
+        lines.push(`    - 来源：${source.project} / ${source.branch} / ${source.version}；${commit}；验证 ${source.verification}；目录 ${source.repo}`);
+      }
     }
   }
 }
@@ -1891,14 +1907,17 @@ async function main() {
     { headless: !args.headed },
   ]) {
     try {
-      browser = await chromium.launch(launchOptions);
+      browser = await chromium.launchPersistentContext(
+        path.join(os.homedir(), ".codex", "zentao-bug-triage", "browser-profile"),
+        { ...launchOptions, viewport: { width: 1440, height: 960 } }
+      );
       break;
     } catch (error) {
       lastLaunchError = error;
     }
   }
   if (!browser) throw lastLaunchError;
-  const context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+  const context = browser;
   const page = await context.newPage();
   try {
     await loginIfNeeded(page, credentials);
@@ -2007,6 +2026,7 @@ async function main() {
     const memoryResult = enrichBugsWithMemory(bugs, ctx, {
       enabled: args.memoryLink,
       root: path.resolve(args.fixPatterns),
+      activeProjects: path.resolve(args.activeProjects),
     });
     bugs = memoryResult.bugs;
     ctx.memory = memoryResult.summary;

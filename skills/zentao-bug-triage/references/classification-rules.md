@@ -87,7 +87,7 @@ Default handling:
 
 - `work-items.md`: include `可以先查` bugs, `待判断/可查` bugs, and `需要日志后再查` bugs when the detail page already provides relevant logs/videos/images.
 - `ignored-items.md`: include `不直接处理-底层`, `不直接处理-平台`, unclear-without-expectation/evidence, closed/resolved, and log-needed bugs without evidence.
-- List-only work items may be shown in `work-items.md`, but code edits must wait until that bug is deep-fetched with `--ids`.
+- The fast list path returns the compact table with repair clues and does not create `work-items.md`. Selected details are required before source applicability assessment.
 
 ## Reactivated Bugs
 
@@ -101,7 +101,7 @@ Default handling:
 - Read fix-pattern notes only from the configured local `fix-patterns` folder. Do not write or update memory during bug fetching.
 - Score evidence from explicit keywords, code identifiers, business-domain terms, symptom overlap, current repo/branch applicability, and note verification status.
 - Device, branch, or repo text is context evidence only. It cannot create a match without issue-specific evidence.
-- Keep at most three candidates and expose only title, path, score, verification state, and concise reasons.
+- Keep at most three candidates. Include title, path, relevance score, concise reasons, and exact source project/branch/commit-or-working-changes with its recorded evidence level. Candidate discovery and comparison follow [repair candidate assessment](fix-candidates.md).
 - `高`: score at least 10, note is verified, at least two evidence dimensions match, and either project applicability or a code identifier matches.
 - `中`: score at least 6 but high-confidence gates are incomplete.
 - `低`: score at least 3 with issue-specific evidence.
@@ -109,8 +109,9 @@ Default handling:
 
 ## Repair Eligibility
 
-- `可直接修复候选`: full detail is available, expected behavior is clear, handling queue is `work`, and an already verified same-project memory note has a high match. This label still requires current-code and Git checks before editing.
-- `可移植候选`: high/medium memory match exists, but branch, project, or evidence is not sufficient to apply it directly.
+- `有修复线索-待核实`: list-only evidence has a related note; no root-cause or portability conclusion is available.
+- `修复候选-待源码核实`: selected details have a related note; compare source and target before deciding applicability. Text ranking never grants direct repair eligibility.
+- `检索未完成`: candidate inputs were missing, unreadable or invalid; preserve the Bug list and do not report a definitive no-match result.
 - `需先查代码`: firmware-owned candidate without reliable memory evidence.
 - `需先深抓`: only list-row information is available.
 - `需日志验证`: a log-dependent issue has no usable attachment/evidence.
@@ -122,7 +123,7 @@ Default handling:
 
 Use these columns unless the user asks otherwise:
 
-| Bug（ID + 标题） | 类型 | 记忆命中 | 修复资格 | 处理建议 | 附件 |
+| Bug（ID + 标题） | 类型 | 修复候选 | 核实状态 | 处理建议 | 附件 |
 | --- | --- | --- | --- | --- | --- |
 | 3526 计算机界面向右滑动会有点卡顿 | UI | 未命中 | 需先查代码 | 可查 | 无 |
 

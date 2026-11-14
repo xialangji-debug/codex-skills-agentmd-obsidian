@@ -1,11 +1,6 @@
----
-name: asr3601-protocol-branch-matrix
-description: Maintain and use the local ASR3601/Crane SDK protocol reference library for APP, XCX/小程序, YL, AKQ, platform, and branch-support questions. Use when the user provides protocol PDFs/DOCX/XLSX/images/text to save or update, asks “这个上报符合协议吗”, “APP协议/小程序协议/YL/AKQ 是哪条路径”, “平台侧还是代码原因”, “当前版本有没有支持这个协议”, “这个分支能不能移植/是否已经合入”, or needs protocol evidence compared with current ASR3601 firmware code. Route concrete bug fixes to asr3601-lvgl-firmware-triage, cross-branch ports to asr3601-cross-branch-porting, and pure Zentao fetching/listing to zentao-bug-triage.
----
+# Protocol References And Branch Support
 
-# ASR3601 Protocol Branch Matrix
-
-Use this skill as the protocol and branch-support front door. It keeps protocol documents in the user's Obsidian vault and uses them to decide whether a behavior belongs to firmware code, APP/XCX/YL/AKQ protocol mismatch, platform parsing, or branch/product support.
+Use this mode directly for protocol imports, report compliance, firmware/platform attribution, or branch-support comparisons. It does not require a Bug, a source fix, or project preparation. Keep protocol documents in the work Vault and use the applicable source/version to distinguish firmware code, APP/XCX/YL/AKQ mismatch, platform parsing, and branch/product support.
 
 ## Fixed Paths
 
@@ -93,11 +88,11 @@ Always cite decisive evidence: protocol file/version, `matrix.md` row, code file
 ## Routing Rules
 
 - Pure “抓 bug/当前 bug/禅道有哪些 bug”: use `zentao-bug-triage`.
-- Concrete bug report with screenshots/logs/repro steps: use `asr3601-lvgl-firmware-triage` for the direct Codex investigation, then return here only for protocol ambiguity.
-- Current-branch firmware code fix: use `asr3601-lvgl-firmware-triage` after this skill frames the protocol conclusion.
+- Concrete bug report with screenshots/logs/repro steps: use `asr3601-lvgl-firmware-triage` for the direct Codex investigation, then use this reference only for protocol ambiguity.
+- Current-branch firmware code fix: use `asr3601-lvgl-firmware-triage` after this mode frames the protocol conclusion.
 - Cross-branch or sibling-project migration: use `asr3601-cross-branch-porting` after identifying source/target protocol support.
 - Verified reusable protocol fixes: update `Codex\fix-patterns\` through `obsidian-fix-pattern-memory` unless the user says not to record.
-- Release packaging for AKQ: use `akq-firmware-release`; this skill only decides protocol support and evidence.
+- Release packaging for AKQ: use `akq-firmware-release`; this mode only decides protocol support and evidence.
 
 ## Output Shape
 

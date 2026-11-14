@@ -23,7 +23,12 @@ def run(args: list[str], env: dict[str, str], ok: bool = True) -> subprocess.Com
     return result
 
 
-with tempfile.TemporaryDirectory(prefix="delivery-state-") as temp:
+validation_root = Path(os.environ.get(
+    "CODEX_TEST_VALIDATION_ROOT",
+    str(SCRIPT.resolve().parents[3] / ".codex-project/validation/delivery-state-regression"),
+))
+validation_root.mkdir(parents=True, exist_ok=True)
+with tempfile.TemporaryDirectory(prefix="delivery-state-", dir=validation_root) as temp:
     root = Path(temp)
     repo = root / "repo"
     home = root / "home"
@@ -39,7 +44,7 @@ with tempfile.TemporaryDirectory(prefix="delivery-state-") as temp:
     note = home / "fix-pattern.md"
     note.write_text("# synthetic fix\n", encoding="utf-8")
 
-    created = run(["init", "--repo", str(repo), "--bugs", "1001,1002", "--delivery", "test", "--release-requested"], env)
+    created = run(["init", "--repo", str(repo), "--bugs", "1001,1002", "--delivery", "test", "--release-requested", "--terminal-stage", "zentao_resolved"], env)
     state_path = Path(created.stdout.strip())
     assert state_path.exists()
     initial = json.loads(state_path.read_text(encoding="utf-8"))
@@ -128,7 +133,7 @@ with tempfile.TemporaryDirectory(prefix="delivery-state-") as temp:
         "delivery_id": "legacy",
         "repo": str(repo.resolve()),
         "repo_name": repo.name,
-        "branch": "master",
+        "branch": subprocess.check_output(["git", "-C", str(repo), "branch", "--show-current"], text=True).strip(),
         "base_commit": commit_2001[:7],
         "dirty": "",
         "created_at": "test",
@@ -171,5 +176,62 @@ with tempfile.TemporaryDirectory(prefix="delivery-state-") as temp:
     assert "resolution-evidence" in blocked.stderr
     run([*required_resolution, "--resolution-evidence", "authorized resolver final-status receipt"], env)
     assert json.loads(legacy_path.read_text(encoding="utf-8"))["schema_version"] == 3
+
+    # Narrowing withdraws pending work without erasing completed Bug evidence.
+    scoped = run([
+        "init", "--repo", str(repo), "--bugs", "5001,5002", "--delivery", "scope",
+        "--release-requested", "--terminal-stage", "zentao_resolved",
+    ], env)
+    scope_path = Path(scoped.stdout.strip())
+    for stage in ("deep_fetched", "diagnosed"):
+        run(["advance", "--repo", str(repo), "--delivery", "scope", "--bug", "5001",
+             "--stage", stage, "--evidence", "checked"], env)
+    run(["finish", "--repo", str(repo), "--delivery", "scope", "--bug", "5001",
+         "--outcome", "already_fixed", "--evidence", "existing fix inspected",
+         "--resolution-evidence", "test-only resolver receipt"], env)
+    scope_before = json.loads(scope_path.read_text(encoding="utf-8"))
+    run(["narrow", "--repo", str(repo), "--delivery", "scope", "--cancel-release",
+         "--no-zentao", "--stop", "--evidence", "stop the loop; no release or resolution"], env)
+    scope_after = json.loads(scope_path.read_text(encoding="utf-8"))
+    assert scope_after["bugs"] == scope_before["bugs"]
+    assert scope_after["completed_receipts"] == scope_before["completed_receipts"]
+    assert scope_after["active_bug"] == "5002"
+    assert scope_after["terminal_stage"] == "memory_decided"
+    assert scope_after["release"]["status"] == "cancelled"
+    stopped_bytes = scope_path.read_bytes()
+    run(["advance", "--repo", str(repo), "--delivery", "scope", "--bug", "5002",
+         "--stage", "deep_fetched", "--evidence", "withdrawn work"], env, ok=False)
+    run(["status", "--repo", str(repo), "--delivery", "scope"], env)
+    assert scope_path.read_bytes() == stopped_bytes
+    run(["resume", "--repo", str(repo), "--delivery", "scope",
+         "--evidence", "continue local work only"], env)
+    resumed = json.loads(scope_path.read_text(encoding="utf-8"))
+    assert not resumed["stopped"] and not resumed["release"]["requested"]
+    assert resumed["terminal_stage"] == "memory_decided"
+    run(["advance", "--repo", str(repo), "--delivery", "scope", "--bug", "5002",
+         "--stage", "deep_fetched", "--evidence", "authorized continuation"], env)
+    run(["advance", "--repo", str(repo), "--delivery", "scope", "--bug", "5002",
+         "--stage", "diagnosed", "--evidence", "checked"], env)
+    run(["finish", "--repo", str(repo), "--delivery", "scope", "--bug", "5002",
+         "--outcome", "no_change", "--evidence", "checked"], env)
+    cancelled_bytes = scope_path.read_bytes()
+    blocked_release = run(["release", "--repo", str(repo), "--delivery", "scope",
+                           "--status", "released", "--evidence", "withdrawn release"], env, ok=False)
+    assert "current recorded scope" in (blocked_release.stdout + blocked_release.stderr)
+    assert scope_path.read_bytes() == cancelled_bytes
+
+    # Withdrawing future release scope cannot erase an already published fact.
+    published_before = json.loads(fast_path.read_text(encoding="utf-8"))
+    run(["narrow", "--repo", str(repo), "--delivery", "fast", "--cancel-release",
+         "--evidence", "no further releases"], env)
+    published_after = json.loads(fast_path.read_text(encoding="utf-8"))
+    assert published_after["release"]["status"] == "released"
+    assert published_after["release"]["evidence"] == published_before["release"]["evidence"]
+    assert published_after["completed_receipts"] == published_before["completed_receipts"]
+
+    # A mutation without an exact delivery ID must not select another chat's state.
+    before_missing_id = {p: p.read_bytes() for p in state_path.parent.glob("*.json")}
+    run(["narrow", "--repo", str(repo), "--cancel-release", "--evidence", "missing target"], env, ok=False)
+    assert before_missing_id == {p: p.read_bytes() for p in state_path.parent.glob("*.json")}
 
 print("delivery state tests passed")

@@ -6,6 +6,8 @@ open-loop reconciliation requests.
 ## State Meanings
 
 - `BLOCKED` and `DEVICE_VERIFICATION_PENDING` remain unresolved validation debt.
+- `FUNCTIONAL_VERIFICATION_PENDING` means tool/document/platform acceptance is still pending;
+  `ACCEPTANCE_SCOPE_PENDING` means the evidence object is not yet identified. Both remain blocked.
 - `READY_FOR_QA` means the required device/platform evidence exists and only QA
   closure remains.
 - `COMPLETE` means the requested evidence layers are complete.
@@ -41,3 +43,29 @@ python -X utf8 "$env:USERPROFILE\.codex\skills\obsidian-fix-pattern-memory\scrip
 Only machine-marked validation-debt entries participate. Human-authored unmarked
 items remain untouched. Counts distinguish root-cause notes from exact target
 rows.
+
+## Work identity and validation scope
+
+Machine work-item markers use `v2-<sha256>` over `(fix_id, target_id)`; legacy
+records use source filename when no fix identity exists. Renaming a managed note
+does not change its work identity. A target id alone is not a unique root cause.
+Old unambiguous markers get migration suggestions; ambiguous markers list every
+candidate and never select one silently. A missing item after filtering is not
+proof of completion. Duplicate composite identities fail delta generation.
+
+Scope selectors live in [validation-policy.json](validation-policy.json).
+Rules are evaluated in order; fields in one rule are AND, patterns within a field
+are OR, using case-insensitive shell globs. An alternate policy can be selected
+with `--validation-policy <path>`. Tooling areas and configured control projects
+precede firmware domains. Unknown scopes remain pending; `domain=none` does not
+mean complete. This changes report wording and readiness only, never evidence.
+Legacy explicit verification text remains authoritative and is not reinterpreted.
+Failed/reactivated states always require review even if an older state says QA passed.
+
+Use `--overview` for a concise current work view. It reads the enabled repositories
+in `~/.codex/active-projects.json` (override with `--active-projects`) and their live
+Git branches. `--current-branches` filters the full report by those branches and
+fails if a repository cannot be read or is detached. A branch match is navigation,
+not device identity or proof of a reproduced defect. Reports never rewrite the
+canonical open-loops page automatically. Invalidated historical decisions may be
+preserved under `superseded_entries`; only `entries` participates in filtering.

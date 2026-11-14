@@ -333,10 +333,12 @@ def _variant_checks(repo: Path, adapter: dict[str, Any]) -> list[str]:
     if adapter.get("contextBinding"):
         from asr360x_profile_store import assert_binding, live_binding
         try:
-            assert_binding(adapter["contextBinding"], live_binding(repo))
+            assert_binding(adapter["contextBinding"], live_binding(repo, adapter))
         except ValueError as exc:
             raise ProfileError(str(exc)) from exc
         return ["live Git/product/build identity matches registered profile"]
+    if "configurationInputs" in adapter and adapter["configurationInputs"] != []:
+        raise ProfileError("configurationInputs requires a registered contextBinding")
     # Compatibility for explicit, unregistered v1 adapters. Default controller
     # entrypoints prepare a registered profile and do not take this path.
     variant_path = repo / ".codex-project" / "variant.md"

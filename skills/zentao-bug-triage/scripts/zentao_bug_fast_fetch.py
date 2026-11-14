@@ -134,6 +134,7 @@ def snapshot_command(
     bug_ids: str = "",
     status_refresh: bool = False,
     deep_all: bool = False,
+    memory_link: bool = True,
 ) -> list[str]:
     node = shutil.which("node")
     if not node:
@@ -176,9 +177,10 @@ def snapshot_command(
                     "0",
                     "--no-download-attachments",
                     "--no-work-md",
-                    "--no-memory-link",
                 ]
             )
+    if not memory_link and "--no-memory-link" not in command:
+        command.append("--no-memory-link")
     return command
 
 
@@ -190,6 +192,7 @@ def fetch_snapshot(
     bug_ids: str = "",
     status_refresh: bool = False,
     deep_all: bool = False,
+    memory_link: bool = True,
 ) -> Path:
     live = live_context(repo)
     lines = stream_command(
@@ -202,6 +205,7 @@ def fetch_snapshot(
             bug_ids,
             status_refresh,
             deep_all,
+            memory_link,
         ),
         repo,
         node_environment(),
@@ -329,6 +333,7 @@ def parse_args() -> argparse.Namespace:
         help="Compare with the exact-target baseline and refresh missing tracked Bug statuses.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Check only whether onboarding would run.")
+    parser.add_argument("--no-memory-link", action="store_true", help="Skip repair candidate lookup for this fetch.")
     parser.add_argument("--validate-only", type=Path, help="Validate an existing bugs.json without network access.")
     return parser.parse_args()
 
@@ -376,6 +381,7 @@ def main() -> int:
         args.detail_concurrency,
         bug_ids=args.ids,
         deep_all=args.deep_all,
+        memory_link=not args.no_memory_link,
     )
     payload, errors, missing, warnings = validate_snapshot(
         snapshot,
@@ -404,6 +410,7 @@ def main() -> int:
             args.detail_concurrency,
             bug_ids=args.ids,
             deep_all=args.deep_all,
+            memory_link=not args.no_memory_link,
         )
         payload, errors, missing, warnings = validate_snapshot(
             snapshot,
@@ -428,7 +435,7 @@ def main() -> int:
     retry_ids = sorted(set(missing) | bug_error_ids) if require_details else []
     for bug_id in retry_ids:
         print(f"[fast-fetch] attachment-retry={bug_id}")
-        retry = fetch_snapshot(repo, args.bug_status, 1, 1, bug_id)
+        retry = fetch_snapshot(repo, args.bug_status, 1, 1, bug_id, memory_link=not args.no_memory_link)
         _, retry_errors, retry_missing, retry_warnings = validate_snapshot(
             retry, repo, args.bug_status, expected_product=expected_product
         )
